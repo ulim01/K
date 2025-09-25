@@ -1,0 +1,69 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<title>마호 게시판</title>
+<style>
+  body { font-family: sans-serif; padding: 20px; background:#f8f8f8; }
+  h1 { text-align:center; }
+  #posts { margin-top:20px; }
+  .post { background:white; border:1px solid #ccc; padding:10px; margin-bottom:10px; cursor:pointer; }
+  .post:hover { background:#eee; }
+  .button { padding:5px 10px; margin:5px; background:#007bff; color:white; border:none; cursor:pointer; border-radius:3px; }
+  .button:hover { background:#0056b3; }
+</style>
+</head>
+<body>
+
+<h1>📌 마호 게시판</h1>
+<button class="button" onclick="createPost()">글쓰기</button>
+<div id="posts"></div>
+
+<script>
+// 더미 데이터
+let posts = [
+  {id:1, title:"오늘의 점심", author:"김학생", content:"오늘 급식에 돈까스 나왔다 🍴"},
+  {id:2, title:"초능력 배틀 후기", author:"이능력자", content:"오늘 배틀 진짜 재밌었음!"},
+  {id:3, title:"동아리 모집", author:"박마법", content:"마법 동아리 신입 모집합니다."}
+];
+
+function renderPosts() {
+  const container = document.getElementById('posts');
+  container.innerHTML = '';
+  posts.forEach(p => {
+    const div = document.createElement('div');
+    div.className = 'post';
+    div.textContent = `${p.id}. ${p.title} - ${p.author}`;
+    div.onclick = () => viewPost(p.id);
+    container.appendChild(div);
+  });
+}
+
+function viewPost(id) {
+  const post = posts.find(p => p.id === id);
+  if(!post) return;
+  const content = prompt(`${post.title} - ${post.author}\n\n${post.content}\n\n댓글 작성:`, "");
+  if(content) {
+    alert("✅ 댓글이 등록되었습니다! (실제 DB 연결 필요)");
+  }
+}
+
+function createPost() {
+  const title = prompt("제목을 입력하세요:");
+  if(!title) return;
+  const author = prompt("작성자 이름:");
+  if(!author) return;
+  const content = prompt("내용을 입력하세요:");
+  if(!content) return;
+  const newId = posts.length + 1;
+  posts.push({id:newId, title, author, content});
+  renderPosts();
+  alert("✅ 글이 등록되었습니다! (실제 DB 연결 필요)");
+}
+
+// 초기 렌더링
+renderPosts();
+</script>
+
+</body>
+</html>
