@@ -37,7 +37,13 @@ function writeRequest(name,data){const file=path.join(process.env.RUNNER_TEMP||'
     if(old) {
       if(old.digest!==expected || old.size!==fs.statSync(file).size)throw Error('Existing draft asset differs: '+old.name);
     } else {
-      execFileSync('gh',['release','upload',tag,file,'--repo',repo],{stdio:'inherit'});
+      const upload=new URL(release.upload_url.replace(/\{.*\}$/, ''));
+      if(upload.protocol!=='https:' || upload.hostname!=='uploads.github.com')throw Error('Unexpected release upload destination');
+      upload.searchParams.set('name',path.basename(file));
+      const response=await fetch(upload,{method:'POST',headers:{Authorization:'Bearer '+process.env.GH_TOKEN,Accept:'application/vnd.github+json','Content-Type':'application/octet-stream','Content-Length':String(fs.statSync(file).size),'X-GitHub-Api-Version':'2022-11-28'},body:fs.createReadStream(file),duplex:'half'});
+      const result=await response.json();
+      if(!response.ok)throw Error('Asset upload failed ('+response.status+'): '+(result.message||'unknown error'));
+      console.log('Uploaded asset:',result.name,result.size);
     }
   }
   release=api(`repos/${repo}/releases/${releaseId}`);

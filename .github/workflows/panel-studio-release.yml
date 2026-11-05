@@ -2,7 +2,7 @@ name: Publish Panel Studio Windows
 on:
   push:
     branches: [panel-studio-release-v1.0.0]
-    paths: [package.json]
+    paths: [package.json, scripts/publish-release.cjs]
   workflow_dispatch:
 permissions:
   contents: write
