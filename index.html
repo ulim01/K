@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; object-src 'none'; base-uri 'none'">
+  <title>Panel Studio · 나만의 웹툰 작업실</title>
+  <link rel="stylesheet" href="src/style.css">
+</head>
+<body>
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="Panel Studio"><span class="brand-mark"><i></i><i></i><i></i></span><span>panel<span class="brand-light">studio</span><small>나만의 웹툰 작업실</small></span></a>
+    <div class="document-title"><input id="project-name" value="나의 첫 번째 이야기" aria-label="프로젝트 이름"><span class="badge">PROJECT</span></div>
+    <div class="top-actions"><span id="save-state" class="save-state">● 로컬 자동 저장</span><button data-action="open" class="quiet">열기</button><button data-action="save" class="quiet" title="Ctrl+S">프로젝트 저장</button><button data-action="export" class="primary">내보내기 <span>↗</span></button></div>
+  </header>
+  <div class="app-shell">
+    <nav class="rail" aria-label="소재 종류">
+      <button class="rail-item active" data-tab="bubbles" title="말풍선"><span>◯</span>말풍선</button>
+      <button class="rail-item" data-tab="sfx" title="효과음"><span class="sfx-icon">팡!</span>효과음</button>
+      <button class="rail-item" data-tab="text" title="텍스트"><span>T</span>텍스트</button>
+      <button class="rail-item" data-tab="images" title="이미지"><span>▧</span>이미지</button>
+      <button class="rail-item" data-tab="panels" title="컷과 효과"><span>▱</span>컷·효과</button>
+      <div class="rail-bottom"><button class="rail-item" data-action="help"><span>?</span>사용법</button><button class="rail-item" data-action="new"><span>＋</span>새 작업</button></div>
+    </nav>
+    <aside class="library">
+      <div class="library-heading"><div class="eyebrow">YOUR CREATIVE TOOLKIT</div><h1 id="library-title">말풍선</h1><p id="library-description">이야기에 목소리를 더해 보세요.</p></div>
+      <div id="library-content" class="library-content"></div>
+      <div class="page-section"><div class="section-title">페이지 <span id="page-count">01</span><button data-action="add-page" title="페이지 추가" aria-label="페이지 추가">＋</button></div><div id="page-list"></div></div>
+    </aside>
+    <main class="workspace">
+      <div class="toolbar">
+        <div class="tool-group"><button data-tool="select" class="tool active" title="선택 (V)" aria-label="선택">↖</button><button data-tool="hand" class="tool" title="화면 이동 (H / Space)" aria-label="화면 이동">✋</button><button data-tool="pen" class="tool" title="펜 (B)" aria-label="펜">✎</button><span class="divider"></span><button data-action="undo" id="undo" class="tool" title="실행 취소 (Ctrl+Z)" aria-label="실행 취소">↶</button><button data-action="redo" id="redo" class="tool" title="다시 실행 (Ctrl+Shift+Z)" aria-label="다시 실행">↷</button></div>
+        <div class="view-switch" role="group" aria-label="페이지 보기"><button data-view="page" class="active">▣ 한 장씩</button><button data-view="scroll">▥ 이어 보기</button></div>
+        <div class="tool-group"><button data-action="grid" class="tool" id="grid-button" title="격자 표시" aria-label="격자 표시">▦</button><button data-action="snap" class="tool" id="snap-button" title="10px 격자 맞춤" aria-label="격자 맞춤">⌗</button><button data-action="preview" class="quiet" id="preview-button">미리 보기</button></div>
+      </div>
+      <div class="contextbar"><span id="context-hint">소재를 선택하면 캔버스에 추가됩니다.</span><div id="context-actions"></div></div>
+      <div id="stage-viewport" class="stage-viewport"><div id="stage" class="stage"></div></div>
+      <footer class="statusbar"><span id="page-status">PAGE 01</span><span id="dimensions">900 × 1400 px</span><span class="status-spacer"></span><button data-action="previous-page" aria-label="이전 페이지">‹</button><span id="page-position">1 / 1</span><button data-action="next-page" aria-label="다음 페이지">›</button><div class="zoom-controls"><button data-action="zoom-out" aria-label="축소">−</button><button data-action="fit" id="zoom-label" title="화면에 맞추기">50%</button><button data-action="zoom-in" aria-label="확대">＋</button><button data-action="fit" title="화면에 맞추기">⛶</button></div></footer>
+    </main>
+    <aside class="inspector"><div class="inspector-heading"><h2>속성</h2><span id="selection-type">CANVAS</span></div><div id="properties"></div><div class="layers-heading"><h2>레이어</h2><span id="layer-count">0</span></div><div class="layer-toolbar"><button data-action="bring-front" title="맨 앞으로">⇈</button><button data-action="forward" title="앞으로">↑</button><button data-action="backward" title="뒤로">↓</button><button data-action="send-back" title="맨 뒤로">⇊</button><button data-action="duplicate" title="복제 (Ctrl+D)">⧉</button><button data-action="delete" title="삭제 (Delete)">⌫</button></div><div id="layers"></div></aside>
+  </div>
+  <input type="file" id="image-input" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden>
+  <input type="file" id="project-input" accept=".json,.panel,.panel.json" hidden>
+  <input type="file" id="font-input" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
+  <div id="toast" class="toast" role="status" aria-live="polite"></div>
+  <dialog id="modal"><div id="modal-content"></div></dialog>
+  <script src="vendor/jszip.min.js"></script>
+  <script src="assets/fonts/fonts.js"></script>
+  <script src="assets/demo/demo.js"></script>
+  <script src="src/geometry.js"></script>
+  <script src="src/app.js"></script>
+</body>
+</html>

@@ -1,0 +1,19 @@
+{
+  "name": "panel-studio",
+  "version": "1.0.0",
+  "private": true,
+  "description": "오프라인 Windows 웹툰 제작 도구 — Panel Studio",
+  "main": "electron.cjs",
+  "author": "Panel Studio",
+  "license": "UNLICENSED",
+  "scripts": {
+    "dev": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "test": "node --test tests/geometry.test.cjs && python3 tests/ui_test.py",
+    "package:win": "node scripts/package-windows.cjs"
+  },
+  "devDependencies": {
+    "@electron/get": "4.0.1",
+    "@electron/packager": "19.0.1",
+    "jszip": "3.10.1"
+  }
+}
