@@ -27,7 +27,7 @@ function writeRequest(name,data){const file=path.join(process.env.RUNNER_TEMP||'
   let release=api(`repos/${repo}/releases/${releaseId}`);
   if(release.tag_name!==tag || !release.draft)throw Error('Expected our unpublished release draft');
   const body=fs.readFileSync(path.join(__dirname,'release-notes.md'),'utf8').replace('7afe353275141927cf1d8ad29ac07af1c72b362b749b6bb2558c68638cc3a9f3',hash)+'\nGitHub Actions에서 검증된 소스와 동일한 체크섬의 앱 리소스로 빌드했습니다.\n';
-  const request=writeRequest('panel-release-update.json',{body,target_commitish:process.env.GITHUB_SHA});
+  const request=writeRequest('panel-release-update.json',{tag_name:tag,name:'Panel Studio 1.0.0 — Windows x64',body,target_commitish:process.env.GITHUB_SHA,draft:true,prerelease:true});
   api('--method','PATCH',`repos/${repo}/releases/${releaseId}`,'--input',request);
   const assets=[zip,zip+'.sha256',guide];
   for(const file of assets) {
@@ -51,7 +51,7 @@ function writeRequest(name,data){const file=path.join(process.env.RUNNER_TEMP||'
     const a=release.assets.find(a=>a.name===path.basename(file));
     if(!a||a.state!=='uploaded'||a.size!==fs.statSync(file).size||a.digest!=='sha256:'+digest(fs.readFileSync(file)))throw Error('Uploaded asset did not verify: '+file);
   }
-  const publish=writeRequest('panel-release-publish.json',{draft:false,prerelease:true});
+  const publish=writeRequest('panel-release-publish.json',{tag_name:tag,name:'Panel Studio 1.0.0 — Windows x64',body,target_commitish:process.env.GITHUB_SHA,draft:false,prerelease:true});
   release=api('--method','PATCH',`repos/${repo}/releases/${releaseId}`,'--input',publish);
   console.log(JSON.stringify({url:release.html_url,assets:release.assets.map(a=>({name:a.name,size:a.size,digest:a.digest,url:a.browser_download_url}))},null,2));
 })().catch(e=>{console.error(e.message);process.exitCode=1;});
