@@ -2,7 +2,7 @@
 (() => {
   'use strict';
   const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
-  const {clamp,esc,num,bubblePath,polygonPath,tailGeometry,localPoint,wrapText,crops,validateProject}=G;
+  const {clamp,esc,num,bubblePath,polygonPath,tailGeometry,thoughtTail,localPoint,wrapText,crops,validateProject}=G;
   const uid=()=> 'p'+crypto.getRandomValues(new Uint32Array(2)).join('');
   const clone=o=>JSON.parse(JSON.stringify(o));
   const labels={ellipse:'타원형',round:'둥근 사각형',cloud:'구름형',burst:'외침',thought:'생각',box:'사각형',whisper:'속삭임',caption:'내레이션'};
@@ -14,6 +14,7 @@
   let project,selected=null,tab='bubbles',view='page',tool='select',mode='normal',zoom=.5,showGrid=false,snap=false,preview=false;
   let history=[],historyIndex=-1,drag=null,space=false,clipboard=null,autosaveTimer,toastTimer,dbPromise,dirty=false,saveGeneration=0;
   let penColor='#253b30',penWidth=6,exporting=false,booting=true;
+  let materialLibrary=MaterialLibrary.empty(),materialDirty=false,materialImageCategory='bubbles',materialToDelete=null,materialSaveGeneration=0,materialDraft=null;
   const fonts=[...(window.BUNDLED_FONTS||[])];
   const bundledFontNames=new Set(fonts.map(f=>f.name));
   const imageURLs=new Map();
@@ -69,6 +70,100 @@
   async function registerFonts(list) {
     await Promise.all(list.map(async f=>{try{const face=new FontFace(f.name,`url(${f.data})`,{weight:String(f.weight||400)});await face.load();document.fonts.add(face);}catch(e){console.warn('글꼴을 읽을 수 없습니다:',f.name);}}));
   }
+  // Keep an imported font from replacing another project's or a bundled typeface.
+  function resolveFontConflicts(doc,objects) {
+    for(const name of new Set((doc.fonts||[]).map(f=>f.name))) {
+      const incoming=doc.fonts.filter(f=>f.name===name),existing=fonts.filter(f=>f.name===name);
+      if(existing.length&&incoming.some(f=>!existing.some(x=>(x.weight||400)===(f.weight||400)&&x.data===f.data))) {
+        let renamed;do{renamed=name.slice(0,150)+' '+uid().slice(-7);}while(fonts.some(f=>f.name===renamed)||doc.fonts.some(f=>f.name===renamed));
+        incoming.forEach(f=>f.name=renamed);objects.forEach(o=>{if(o.font===name)o.font=renamed;});
+      }
+    }
+    return doc;
+  }
+  async function addFontFaces(list) {
+    const added=list.filter(f=>!fonts.some(x=>x.name===f.name&&(x.weight||400)===(f.weight||400)&&x.data===f.data));
+    await registerFonts(added);fonts.push(...added);
+  }
+  async function persistMaterials() {
+    const generation=++materialSaveGeneration,saved=clone(materialLibrary);materialDirty=true;
+    try {
+      const db=await getDB();await new Promise((resolve,reject)=>{const t=db.transaction('documents','readwrite');t.objectStore('documents').put(saved,'materials');t.oncomplete=resolve;t.onerror=()=>reject(t.error);t.onabort=()=>reject(t.error||Error('저장 취소'));});
+      if(generation===materialSaveGeneration)materialDirty=false;return true;
+    }catch(e){toast('내 소재를 기기에 저장하지 못했습니다. ‘내 소재 내보내기’로 파일을 보관하세요.');return false;}
+  }
+  function materialControlsHTML(category) {
+    const label=category==='bubbles'?'말풍선':'효과음';
+    return `<div class="material-actions"><button class="primary full" data-action="new-material-${category}">＋ 내 ${label} 만들기</button><div class="material-actions-row"><button data-action="save-material">선택한 소재 저장</button><button data-action="import-material-image">내 그림 불러오기</button></div></div>`;
+  }
+  function materialPreview(item) {
+    const o={...item.template,x:0,y:0,rotation:0};
+    if(o.type==='image')return `<img src="${esc(materialLibrary.assets[o.assetId].src)}" alt="" loading="lazy">`;
+    const tail=o.type==='bubble'&&o.tail!==false&&o.shape!=='caption'?tailGeometry(o):null;
+    const points=tail?[tail.start,tail.end,tail.tip,tail.control]:[],pad=Math.max(12,(o.strokeWidth||0)*2);
+    const x=Math.min(0,...points.map(p=>p.x))-pad,y=Math.min(0,...points.map(p=>p.y))-pad;
+    const w=Math.max(o.w,...points.map(p=>p.x))-x+pad,h=Math.max(o.h,...points.map(p=>p.y))-y+pad;
+    return `<svg viewBox="${x} ${y} ${w} ${h}" aria-hidden="true">${objectSVG(o,false,'material-')}</svg>`;
+  }
+  function materialItemsHTML(category) {
+    const items=materialLibrary.items.filter(i=>i.category===category),label=category==='bubbles'?'말풍선':'효과음';
+    return `<div class="material-section-title">내 ${label} <span>${items.length}</span></div>`+(items.length?`<div class="material-grid">${items.map(item=>`<div class="material-card"><button class="material-item" data-add-material="${esc(item.id)}" title="${esc(item.name)} 추가">${materialPreview(item)}<span>${esc(item.name)}</span></button><button class="material-delete" data-delete-material="${esc(item.id)}" aria-label="${esc(item.name)} 소재 삭제">×</button></div>`).join('')}</div>`:`<p class="material-empty">나만의 ${label}을 만들어 보세요.<br>다른 프로젝트에서도 꺼내 쓸 수 있어요.</p>`);
+  }
+  function materialDialog(category,selectedObject=null) {
+    const label=category==='bubbles'?'말풍선':'효과음';materialDraft=selectedObject?clone(selectedObject):null;
+    const choices=Object.entries(labels).map(([value,label])=>`<option value="${value}">${label}</option>`).join('');
+    const fontChoices=[...new Set(fonts.map(f=>f.name))].map(name=>`<option value="${esc(name)}" ${name==='Black Han Sans'?'selected':''}>${esc(fontNames[name]||name)}</option>`).join('');
+    modal(selectedObject?'선택한 소재 저장':`내 ${label} 만들기`,`<p>${selectedObject?'현재 모양·크기·꼬리·글자 스타일을 함께 저장합니다.':'이름을 붙여 저장하면 왼쪽 내 소재에서 언제든 추가할 수 있어요.'}</p><label for="material-name">소재 이름</label><input id="material-name" maxlength="80" value="${esc(selectedObject?.name||'나만의 '+label)}"><label for="material-category">저장 위치</label><select id="material-category" ${selectedObject?.type==='image'?'':'disabled'}><option value="bubbles" ${category==='bubbles'?'selected':''}>내 말풍선</option><option value="sfx" ${category==='sfx'?'selected':''}>내 효과음</option></select>${selectedObject?'':category==='bubbles'?`<label for="material-shape">말풍선 모양</label><select id="material-shape">${choices}</select><label for="material-text">기본 대사</label><textarea id="material-text" rows="3" maxlength="20000">여기에 대사를 입력하세요.</textarea>`:`<label for="material-text">효과음 글자</label><textarea id="material-text" rows="2" maxlength="20000">두둥!</textarea><label for="material-font">글꼴</label><select id="material-font">${fontChoices}</select><label for="material-color">글자색</label><input class="material-color" id="material-color" type="color" value="#e5874b">`}<p class="material-preview-note">${selectedObject?.type==='image'?'그림 소재는 이미지로 편집됩니다. 대사는 상단 ‘텍스트만 추가’로 올려 보세요.':'캔버스에서 자유롭게 다듬은 뒤 ‘선택한 소재 저장’으로 새 버전도 만들 수 있어요.'}</p>`,`<button class="quiet" data-action="close-modal">취소</button><button class="primary" data-action="create-material">${selectedObject?'내 소재에 저장':'저장하고 캔버스에 추가'}</button>`);
+    $('#material-name').focus();$('#material-name').select();
+  }
+  function saveSelectedMaterial() {
+    const o=object();if(!o||!['bubble','sfx','text','image'].includes(o.type)){toast('저장할 말풍선, 텍스트, 효과음 또는 이미지를 먼저 선택하세요.');return;}
+    materialDialog(o.type==='bubble'?'bubbles':o.type==='image'?(tab==='sfx'?'sfx':'bubbles'):'sfx',o);
+  }
+  async function createMaterial() {
+    const name=$('#material-name').value.trim(),category=$('#material-category').value;
+    if(!name){toast('소재 이름을 입력하세요.');$('#material-name').focus();return;}
+    try {
+      const addToCanvas=!materialDraft,template=materialDraft||(category==='bubbles'?bubble($('#material-shape').value,{text:$('#material-text').value,name}):textObject($('#material-text').value,{type:'sfx',name,font:$('#material-font').value,color:$('#material-color').value,fontSize:100,weight:700,w:500,h:200,align:'center',skew:0,textStroke:'#ffffff',textStrokeWidth:3}));
+      const result=MaterialLibrary.add(materialLibrary,{category,name,template,asset:project.assets[template.assetId],fontFaces:fonts.filter(f=>!bundledFontNames.has(f.name))});
+      materialLibrary=result.library;tab=category;$('#modal').close();renderLibrary();if(addToCanvas)addMaterial(result.item.id);
+      if(await persistMaterials())toast('내 소재에 저장했습니다. 다른 프로젝트에서도 사용할 수 있어요.');
+    }catch(e){toast('소재 저장 실패: '+e.message);}
+  }
+  function addMaterial(id) {
+    const item=materialLibrary.items.find(i=>i.id===id);if(!item)return;
+    const o={...clone(item.template),id:uid(),name:item.name,visible:true,locked:false};
+    if(o.type==='image') {
+      const asset=materialLibrary.assets[o.assetId];let stored=Object.values(project.assets).find(a=>a.src===asset.src);
+      if(!stored){stored={...clone(asset),id:uid()};project.assets[stored.id]=stored;}o.assetId=stored.id;
+    }
+    addObject(place(o));
+  }
+  async function importMaterialImages(files) {
+    const category=materialImageCategory;let count=0;
+    for(const file of files)try {
+      if(!/^image\/(png|jpeg|webp|gif|bmp)$/.test(file.type))throw Error('PNG, JPG, WEBP, GIF, BMP 이미지를 선택하세요.');
+      if(file.size>50*1024*1024)throw Error('이미지 한 장은 50MB 이하로 선택하세요.');
+      const src=await readData(file),im=await loadImage(src),width=im.naturalWidth,height=im.naturalHeight;
+      if(width*height>120000000)throw Error('이미지가 너무 큽니다. 1억 2천만 픽셀 이하로 줄여 주세요.');
+      const scale=Math.min(1,500/width,500/height),name=file.name.replace(/\.[^.]+$/,'').slice(0,80)||'내 그림';
+      const asset={id:uid(),name,src,width,height},template=base('image',{name,w:Math.max(1,Math.round(width*scale)),h:Math.max(1,Math.round(height*scale)),assetId:asset.id,crop:'rectangle',points:clone(crops.rectangle),imageZoom:1,imageX:0,imageY:0,fade:0,fadeAngle:90,fadeStart:0,stroke:'#23352f',strokeWidth:0});
+      materialLibrary=MaterialLibrary.add(materialLibrary,{category,name,template,asset}).library;count++;
+    }catch(e){toast('그림 소재 추가 실패: '+e.message);}
+    if(count){tab=category;renderLibrary();if(await persistMaterials())toast(`${count}개 그림을 내 소재에 저장했습니다. 눌러서 캔버스에 추가하세요.`);}
+  }
+  async function importMaterialLibrary(file) {
+    try {
+      if(file.size>512*1024*1024)throw Error('소재 파일은 512MB 이하만 열 수 있습니다.');
+      const incoming=MaterialLibrary.validate(JSON.parse(await file.text()));resolveFontConflicts(incoming,incoming.items.map(i=>i.template));
+      const result=MaterialLibrary.merge(materialLibrary,incoming);await addFontFaces(result.library.fonts);materialLibrary=result.library;
+      if(!['bubbles','sfx'].includes(tab))tab='bubbles';renderLibrary();renderProperties();
+      if(await persistMaterials())toast(`${result.count}개 소재를 불러왔습니다. 이미 있는 소재는 유지했습니다.`);
+    }catch(e){toast('소재 열기 실패: '+e.message);}
+  }
+  async function exportMaterialLibrary() {
+    try{if(await download(new Blob([JSON.stringify(materialLibrary)],{type:'application/json'}),'Panel-Studio-내-소재.panel-library.json'))toast('내 소재 파일을 저장했습니다. 그림과 추가 글꼴도 함께 보관됩니다.');}catch(e){toast('소재 내보내기 실패: '+e.message);}
+  }
   function fontStyle(o) {return `${o.italic?'italic':'normal'} ${o.weight||400} ${o.fontSize||30}px "${(o.font||'Nanum Gothic').replace(/["\\]/g,'')}"`;}
   function textSVG(o) {
     if(!o.text)return '';
@@ -81,14 +176,14 @@
     const textStroke=o.textStrokeWidth?`stroke="${esc(o.textStroke||'#ffffff')}" stroke-width="${o.textStrokeWidth}" paint-order="stroke fill" stroke-linejoin="round"`:'';
     return `<g transform="skewX(${num(o.skew||0)})"><text fill="${esc(o.color||'#23352f')}" font-family="${esc(o.font||'Nanum Gothic')}" font-size="${size}" font-weight="${o.weight||400}" font-style="${o.italic?'italic':'normal'}" letter-spacing="${spacing}" text-anchor="${align==='center'?'middle':align==='right'?'end':'start'}" ${textStroke}>${lines.map((line,i)=>`<tspan x="${num(x)}" y="${num(y+i*lh)}">${esc(line)||' '}</tspan>`).join('')}</text></g>`;
   }
-  function outline(o) {return `fill="${o.transparent?'none':esc(o.fill||'#ffffff')}" stroke="${esc(o.stroke||'#23352f')}" stroke-width="${o.strokeWidth||0}" stroke-linejoin="round"`;}
+  function outline(o) {return `fill="${o.transparent?'none':esc(o.fill||'#ffffff')}" stroke="${esc(o.stroke||'#23352f')}" stroke-width="${o.strokeWidth||0}" stroke-linejoin="${o.shape==='caption'?'miter':'round'}"`;}
   function clipShape(o) {return o.crop==='ellipse'?`<ellipse cx="${o.w/2}" cy="${o.h/2}" rx="${o.w/2}" ry="${o.h/2}"/>`:`<path d="${polygonPath(o.points||crops.rectangle,o.w,o.h)}"/>`;}
   function objectSVG(o,interactive=true,prefix='') {
     if(o.visible===false)return '';
     let inner='';const id=prefix+o.id;
     if(o.type==='bubble') {
       inner=`<path d="${bubblePath(o)}" ${outline(o)} ${o.shape==='whisper'?'stroke-dasharray="7 6"':''}/>`;
-      if(o.shape==='thought'&&o.tail!==false) {const t=tailGeometry(o);for(let i=1;i<=3;i++){const f=i/3,x=t.base.x+(t.tip.x-t.base.x)*f,y=t.base.y+(t.tip.y-t.base.y)*f,r=(4-i)*Math.max(4,o.tailWidth/8);inner+=`<ellipse cx="${x}" cy="${y}" rx="${r}" ry="${r*.75}" ${outline(o)}/>`;}}
+      if(o.shape==='thought')inner+=thoughtTail(o).map(p=>`<ellipse cx="${p.x}" cy="${p.y}" rx="${p.rx}" ry="${p.ry}" ${outline(o)}/>`).join('');
       inner+=textSVG(o);
     } else if(o.type==='text'||o.type==='sfx') inner=textSVG(o);
     else if(o.type==='image') {
@@ -142,6 +237,7 @@
     $('#page-count').textContent=String(project.pages.length).padStart(2,'0');
     $('#page-list').innerHTML=project.pages.map((p,i)=>`<button class="page-item ${page().id===p.id?'active':''}" data-page-select="${p.id}"><span class="page-icon">${String(i+1).padStart(2,'0')}</span><span><b>${esc(p.name)}</b><small>${p.width} × ${p.height} px</small></span><span class="page-menu">${i+1}</span></button>`).join('');
     const i=project.pages.indexOf(page());$('#page-status').textContent=`PAGE ${String(i+1).padStart(2,'0')}`;$('#dimensions').textContent=`${page().width} × ${page().height} px`;$('#page-position').textContent=`${i+1} / ${project.pages.length}`;$('#zoom-label').textContent=`${Math.round(zoom*100)}%`;
+    $('#canvas-size-label').textContent=`${page().width} × ${page().height} px`;
   }
   function renderLayers() {
     $('#layer-count').textContent=page().objects.length;
@@ -150,13 +246,13 @@
   function renderContext() {
     const o=object();
     $('#context-hint').textContent=preview?'완성된 장면을 확인하세요. 미리 보기를 다시 누르면 편집합니다.':tool==='pen'?'드래그하여 선을 그리세요. B: 펜 · V: 선택':mode==='tail'?'주황색 점으로 꼬리의 끝점·붙는 위치·휘어짐을 조절하세요.':mode==='crop'?'초록색 꼭짓점을 움직이세요. 테두리를 더블클릭하면 편집점이 추가됩니다.':mode==='image-pan'?'이미지 안쪽을 드래그해 구도를 조절하세요.':o?`${typeLabels[o.type]} 선택됨 · 방향키로 이동 · Shift: 10px 이동`:'소재를 선택하면 캔버스에 추가됩니다. 이미지를 끌어 놓을 수도 있어요.';
-    $('#context-actions').innerHTML=o&&!preview?`${o.type==='bubble'?`<button data-action="tail-mode" class="${mode==='tail'?'active':''}">꼬리 편집</button>`:''}${['image','shape'].includes(o.type)?`<button data-action="crop-mode" class="${mode==='crop'?'active':''}">모양 편집</button>`:''}${o.type==='image'?`<button data-action="image-pan" class="${mode==='image-pan'?'active':''}">구도 이동</button>`:''}`:'';
+    $('#context-actions').innerHTML=o&&!preview?`${o.type==='bubble'&&o.shape!=='caption'?`<button data-action="tail-mode" class="${mode==='tail'?'active':''}">꼬리 편집</button>`:''}${['image','shape'].includes(o.type)?`<button data-action="crop-mode" class="${mode==='crop'?'active':''}">모양 편집</button>`:''}${o.type==='image'?`<button data-action="image-pan" class="${mode==='image-pan'?'active':''}">구도 이동</button>`:''}`:'';
     $$('[data-tool]').forEach(b=>b.classList.toggle('active',b.dataset.tool===tool));$$('[data-view]').forEach(b=>b.classList.toggle('active',b.dataset.view===view));
     $('#grid-button').classList.toggle('active',showGrid);$('#snap-button').classList.toggle('active',snap);$('#preview-button').textContent=preview?'편집으로':'미리 보기';
   }
   function render(){renderStage();renderPages();renderProperties();renderLayers();renderContext();updateHistoryButtons();$('#project-name').value=project.name;}
   function fit(){zoom=clamp(Math.min(($('#stage-viewport').clientWidth-100)/page().width,($('#stage-viewport').clientHeight-85)/page().height),.025,2);renderStage();renderPages();}
-  function addObject(o){if(preview)preview=false;page().objects.push(o);selected=o.id;tool='select';mode=o.type==='bubble'?'tail':'normal';commit();render();}
+  function addObject(o){if(preview)preview=false;page().objects.push(o);selected=o.id;tool='select';mode=o.type==='bubble'&&o.shape!=='caption'&&o.tail!==false?'tail':'normal';commit();render();}
   function visibleCenter(){const v=$('#stage-viewport'),svg=$('.page-canvas[data-page="'+page().id+'"]');if(!svg)return {x:page().width/2,y:page().height/2};const b=v.getBoundingClientRect();return screenPoint(svg,b.left+v.clientWidth/2,b.top+v.clientHeight/2);}
   function place(o){const c=visibleCenter();o.x=Math.round(clamp(c.x-o.w/2,0,page().width-o.w));o.y=Math.round(clamp(c.y-o.h/2,0,page().height-o.h));return o;}
   function screenPoint(svg,x,y){return new DOMPoint(x,y).matrixTransform(svg.getScreenCTM().inverse());}
@@ -172,7 +268,7 @@
       $('#properties').innerHTML=section('캔버스 설정',`<div class="prop-field"><label>페이지 이름</label><input data-page-prop="name" aria-label="페이지 이름" value="${esc(page().name)}" style="width:100%"></div><div class="prop-row" style="margin-top:12px">${field('가로 (px)','pageWidth',page().width,1,8000)}${field('세로 (px)','pageHeight',page().height,1,8000)}</div><button class="secondary full" data-action="resize-page">크기 적용</button><p class="small" style="margin-top:8px">페이지당 최대 8000 × 8000 px</p>`)+section('배경',color('배경색','pageBackground',page().background))+section('페이지 관리',`<div class="prop-row"><button class="secondary full" data-action="duplicate-page">페이지 복제</button><button class="quiet full danger" data-action="delete-page">삭제</button></div><div class="prop-row"><button class="quiet full" data-action="page-up">↑ 앞으로</button><button class="quiet full" data-action="page-down">↓ 뒤로</button></div>`)+`<div class="tip-card"><strong>당신의 이야기를 시작하세요</strong>왼쪽에서 소재를 추가하거나 이미지를 끌어 놓으세요.<br>클릭하여 선택 · 모서리로 크기 조절<br>마우스 휠: 스크롤 · Ctrl+휠: 확대</div>`;return;
     }
     let html=section('위치와 크기',`<input data-prop="name" aria-label="레이어 이름" value="${esc(o.name)}" style="width:100%;margin-bottom:12px"><div class="prop-row">${field('X','x',o.x)}${field('Y','y',o.y)}</div><div class="prop-row">${field('가로','w',o.w,1,16000)}${field('세로','h',o.h,1,16000)}</div><div class="prop-row">${field('회전 (°)','rotation',o.rotation,-360,360)}<button class="quiet" data-action="center">가운데 정렬</button></div>${range('불투명도','opacity',Math.round((o.opacity??1)*100),0,100,1,'%')}`);
-    if(o.type==='bubble') html+=section('말풍선 모양',select('shape',o.shape,labels,'말풍선 모양')+`<div style="height:12px"></div>`+color('채우기','fill',o.fill)+color('외곽선','stroke',o.stroke)+range('선 굵기','strokeWidth',o.strokeWidth,0,30)+`<label class="check-row"><input type="checkbox" data-prop="transparent" ${o.transparent?'checked':''}>배경 투명하게</label>`)+section('꼬리 조절',`<label class="check-row"><input type="checkbox" data-prop="tail" ${o.tail!==false?'checked':''}>꼬리 표시</label><button data-action="tail-mode" class="secondary full">${mode==='tail'?'꼬리 편집 마치기':'캔버스에서 꼬리 편집'}</button><div style="height:12px"></div>${range('붙는 각도','tailAngle',o.tailAngle,0,360,1,'°')}${range('꼬리 폭','tailWidth',o.tailWidth,5,180)}<p class="small">끝점은 자유롭게 이동할 수 있어요.<br>휘어짐 점을 움직여 곡선 꼬리를 만드세요.</p>`);
+    if(o.type==='bubble') html+=section('말풍선 모양',select('shape',o.shape,labels,'말풍선 모양')+`<div style="height:12px"></div>`+color('채우기','fill',o.fill)+color('외곽선','stroke',o.stroke)+range('선 굵기','strokeWidth',o.strokeWidth,0,30)+`<label class="check-row"><input type="checkbox" data-prop="transparent" ${o.transparent?'checked':''}>배경 투명하게</label>`)+(o.shape==='caption'?'':section('꼬리 조절',`<label class="check-row"><input type="checkbox" data-prop="tail" ${o.tail!==false?'checked':''}>꼬리 표시</label><button data-action="tail-mode" class="secondary full">${mode==='tail'?'꼬리 편집 마치기':'캔버스에서 꼬리 편집'}</button><div style="height:12px"></div>${range('붙는 각도','tailAngle',o.tailAngle,0,360,1,'°')}${range('꼬리 폭','tailWidth',o.tailWidth,5,180)}<p class="small">끝점은 자유롭게 이동할 수 있어요.<br>휘어짐 점을 움직여 곡선 꼬리를 만드세요.</p>`));
     if(['bubble','text','sfx'].includes(o.type)) {
       const available=Object.fromEntries([...new Set(fonts.map(f=>f.name))].map(n=>[n,fontNames[n]||n]));
       html+=section('텍스트',`<textarea data-prop="text" aria-label="텍스트 내용" rows="3" maxlength="20000">${esc(o.text)}</textarea><div style="height:10px"></div>${select('font',o.font,available,'글꼴')}<div class="prop-row" style="margin-top:10px">${field('크기 (px)','fontSize',o.fontSize,4,1500)}<div class="prop-field"><label>굵기</label>${select('weight',o.weight||400,{100:'100 · 가늘게',300:'300 · 얇게',400:'400 · 보통',500:'500 · 중간',700:'700 · 굵게',800:'800 · 아주 굵게',900:'900 · 두껍게'},'글꼴 굵기')}</div></div>${color('글자색','color',o.color)}<div class="prop-row">${select('align',o.align,{left:'왼쪽 정렬',center:'가운데 정렬',right:'오른쪽 정렬'},'텍스트 정렬')}<label class="check-row"><input type="checkbox" data-prop="italic" ${o.italic?'checked':''}>기울임</label></div>${range('행간','lineHeight',o.lineHeight||1.4,.7,3,.05)}${range('자간','letterSpacing',o.letterSpacing||0,-10,50,.5)}${range('안쪽 여백','padding',o.padding||0,0,150)}${color('글자 외곽선','textStroke',o.textStroke||'#ffffff')}${range('외곽선 굵기','textStrokeWidth',o.textStrokeWidth||0,0,30)}${o.type==='sfx'?range('기울이기','skew',o.skew||0,-40,40,1,'°'):''}<button class="quiet full" data-action="import-font">＋ 내 글꼴 추가 (TTF / OTF)</button><p class="small">굵기 파일이 없는 글꼴은 합성 굵기가 적용됩니다.</p>`);
@@ -183,18 +279,19 @@
       html+=section('외곽선',color('선 색상','stroke',o.stroke)+range('선 굵기','strokeWidth',o.strokeWidth||0,0,60)+(o.type==='shape'?color('채우기','fill',o.fill)+`<label class="check-row"><input type="checkbox" data-prop="transparent" ${o.transparent?'checked':''}>안쪽 투명하게</label>`:''));
     }
     if(o.type==='pen'||o.type==='effect') html+=section('선 스타일',color('선 색상','stroke',o.stroke)+range('선 굵기','strokeWidth',o.strokeWidth,1,100)+(o.type==='effect'?range('선 개수','density',o.density||60,5,150):''));
-    $('#properties').innerHTML=`${o.locked?'<p class="empty-info">이 레이어는 잠겨 있습니다. 레이어 목록에서 잠금을 해제하세요.</p>':''}<fieldset ${o.locked?'disabled':''} style="border:0;padding:0;margin:0;min-width:0">${html}</fieldset>`;
+    $('#properties').innerHTML=`${['bubble','sfx','text','image'].includes(o.type)?`<button class="save-material-button full" data-action="save-material">＋ ${o.type==='bubble'?'내 말풍선으로':o.type==='sfx'||o.type==='text'?'내 효과음으로':'내 소재로'} 저장</button>`:''}${o.locked?'<p class="empty-info">이 레이어는 잠겨 있습니다. 레이어 목록에서 잠금을 해제하세요.</p>':''}<fieldset ${o.locked?'disabled':''} style="border:0;padding:0;margin:0;min-width:0">${html}</fieldset>`;
   }
   function renderLibrary() {
     const names={bubbles:['말풍선','이야기에 목소리를 더해 보세요.'],sfx:['효과음','장면에 생동감을 더하는 한 글자.'],text:['텍스트','당신의 이야기를, 당신의 글씨로.'],images:['이미지','장면을 불러오고 자유롭게 다듬으세요.'],panels:['컷 · 효과','장면의 리듬과 속도를 만들어 보세요.']};
     $('#library-title').textContent=names[tab][0];$('#library-description').textContent=names[tab][1];$$('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
     let html='';
-    if(tab==='bubbles') html=`<div class="preset-grid">${Object.entries(labels).map(([shape,label])=>{const b=bubble(shape,{w:110,h:65,tailWidth:13,tailX:.75,tailY:1.25,strokeWidth:2,text:''});return `<button class="preset" data-add-bubble="${shape}"><svg viewBox="-8 -4 130 98"><path d="${bubblePath(b)}" fill="#fff" stroke="#53664e" stroke-width="2" ${shape==='whisper'?'stroke-dasharray="4 3"':''}/>${shape==='thought'?'<ellipse cx="86" cy="73" rx="7" ry="5" fill="white" stroke="#53664e" stroke-width="2"/><circle cx="94" cy="83" r="3" fill="white" stroke="#53664e"/>':''}${shape==='burst'?'<text x="55" y="41" text-anchor="middle" font-size="20" fill="#53664e">!</text>':''}</svg><span>${label}</span></button>`;}).join('')}</div><div class="tip-card"><strong>↳ 꼬리도, 내 마음대로</strong>말풍선을 추가하고 ‘꼬리 편집’을 누르세요. 세 개의 점으로 위치와 곡선을 자유롭게 조절할 수 있어요.</div>`;
+    if(tab==='bubbles') html=`<div class="preset-grid">${Object.entries(labels).map(([shape,label])=>{const b=bubble(shape,{w:110,h:65,tailWidth:13,tailX:shape==='thought'?.85:.75,tailY:shape==='thought'?1.4:1.25,strokeWidth:2,text:''});return `<button class="preset" data-add-bubble="${shape}"><svg viewBox="-8 -4 130 98"><path d="${bubblePath(b)}" fill="#fff" stroke="#53664e" stroke-width="2" ${shape==='whisper'?'stroke-dasharray="4 3"':''}/>${shape==='thought'?thoughtTail(b).map(p=>`<ellipse cx="${p.x}" cy="${p.y}" rx="${p.rx}" ry="${p.ry}" fill="white" stroke="#53664e" stroke-width="2"/>`).join(''):''}${shape==='burst'?'<text x="55" y="41" text-anchor="middle" font-size="20" fill="#53664e">!</text>':''}</svg><span>${label}</span></button>`;}).join('')}</div><div class="tip-card"><strong>↳ 꼬리도, 내 마음대로</strong>말풍선을 추가하고 ‘꼬리 편집’을 누르세요. 세 개의 점으로 위치와 곡선을 자유롭게 조절할 수 있어요.</div>`;
     if(tab==='sfx') html=`<div class="preset-grid">${sfxPresets.map(([text,font,col,skew],i)=>`<button class="sfx-preset" data-add-sfx="${i}" style="font-family:'${font}';color:${col};font-size:${text.length>3?24:30}px">${text}</button>`).join('')}</div><div class="tip-card"><strong>나만의 효과음</strong>추가 후 글자, 글꼴, 색, 외곽선과 기울기를 모두 바꿀 수 있어요.</div>`;
     if(tab==='text')html=`<button class="text-preset" data-add-text="title" style="font-size:25px;font-weight:800">제목을 더하세요</button><button class="text-preset" data-add-text="body" style="font-size:14px">이야기를 써 내려가세요.</button><button class="text-preset" data-add-text="hand" style="font-family:'Nanum Pen Script';font-size:27px">마음을 담은 한 줄</button><div class="subheading">오프라인 한글 글꼴 ${new Set(fonts.map(f=>f.name)).size}종</div>${Object.entries(fontNames).map(([n,l])=>`<button class="text-preset" data-font-text="${n}" style="font-family:'${n}';font-size:18px">${l}</button>`).join('')}<button class="secondary full" style="margin-top:16px" data-action="import-font">＋ 내 글꼴 추가</button>`;
     if(tab==='images')html=`<button class="primary full" data-action="import-image">＋ 이미지 불러오기</button><p class="small" style="margin-top:10px">PNG · JPG · WEBP · GIF · BMP<br>여러 파일을 끌어 놓을 수도 있어요.</p><div class="subheading">내 배경 라이브러리</div><div class="image-grid">${(window.DEMO_ASSETS||[]).map(a=>`<button class="image-card" data-demo-image="${a.id}"><img src="${a.src}" alt="${esc(a.name)}" loading="lazy"><span>${esc(a.name)}</span></button>`).join('')}</div><div class="tip-card"><strong>자유로운 컷 구성</strong>이미지를 추가한 뒤 모양 편집에서 사다리꼴, 평행사변형 또는 원하는 다각형으로 자르세요.</div>`;
     if(tab==='panels')html=`<div class="preset-grid">${Object.entries(cropLabels).filter(([s])=>s!=='custom').map(([s,l])=>`<button class="preset" data-add-panel="${s}"><svg viewBox="0 0 110 75">${s==='ellipse'?'<ellipse cx="55" cy="37" rx="47" ry="29" fill="#f1f5ed" stroke="#53664e" stroke-width="3"/>':`<path d="${polygonPath(crops[s]||crops.rectangle,90,55)}" transform="translate(10 10)" fill="#f1f5ed" stroke="#53664e" stroke-width="3"/>`}</svg><span>${l}</span></button>`).join('')}</div><div class="subheading">장면 효과</div><div class="preset-grid"><button class="preset" data-add-effect="focus"><span style="font-size:38px">✴</span><span>집중선</span></button><button class="preset" data-add-effect="speed"><span style="font-size:38px">≋</span><span>속도선</span></button></div><button class="secondary full" style="margin-top:12px" data-tool="pen">✎ 자유롭게 그리기</button>`;
-    $('#library-content').innerHTML=html;
+    if(tab==='bubbles'||tab==='sfx')html=materialControlsHTML(tab)+materialItemsHTML(tab)+`<div class="subheading">기본 ${tab==='bubbles'?'말풍선':'효과음'}</div>`+html+`<div class="material-backup"><button data-action="export-materials">내 소재 내보내기</button><button data-action="import-materials">소재 파일 불러오기</button></div>`;
+    $('#library-content').innerHTML=html;$('#library-content').scrollTop=0;
   }
   function updateProperty(input,final=false) {
     const key=input.dataset.prop;let value=input.type==='checkbox'?input.checked:input.type==='number'||input.type==='range'?clamp(input.value,+(input.min||-100000),+(input.max||100000)):input.value;
@@ -207,9 +304,9 @@
       if(key==='weight')value=Number(value);
       o[key]=value;
       if(key==='crop') {o.points=clone(crops[value]||o.points||crops.rectangle);if(o.type==='shape')o.shape=value;}
-      if(key==='shape'&&value==='caption')o.tail=false;
+      if(key==='shape'&&value==='caption'){o.tail=false;mode='normal';}
     }
-    const out=input.parentElement.querySelector('output');if(out)out.textContent=input.value+(input.dataset.prop==='opacity'||input.dataset.prop==='fade'||input.dataset.prop==='fadeStart'?'%':'');
+    const out=input.parentElement.querySelector('output');if(input.type==='range'&&out)out.textContent=input.value+(input.dataset.prop==='opacity'||input.dataset.prop==='fade'||input.dataset.prop==='fadeStart'?'%':'');
     const hex=input.parentElement.querySelector('span');if(input.type==='color'&&hex)hex.textContent=value;
     renderStage();renderLayers();if(final){commit();if(input.tagName==='SELECT'||input.type==='checkbox')renderProperties();renderContext();}
   }
@@ -241,6 +338,9 @@
   }
   function modal(title,body,footer='') {$('#modal-content').innerHTML=`<div class="modal-head"><h2>${title}</h2><button data-action="close-modal" aria-label="닫기">×</button></div><div class="modal-body">${body}</div>${footer?`<div class="modal-footer">${footer}</div>`:''}`;if(!$('#modal').open)$('#modal').showModal();}
   function confirmAction(title,message,action) {modal(title,`<p>${esc(message)}</p>`,`<button class="quiet" data-action="close-modal">취소</button><button class="primary" data-action="${action}">계속하기</button>`);}
+  function canvasSizeDialog() {
+    modal('캔버스 크기 변경',`<div class="canvas-modal-summary"><strong>${esc(page().name)}</strong><span>현재 ${page().width} × ${page().height} px · 이 페이지의 크기를 변경합니다.</span></div><label for="page-preset">크기 프리셋</label><select id="page-preset"><option value="${page().width},${page().height}">현재 크기</option><option value="800,1280">웹툰 · 800 × 1280</option><option value="900,1400">웹툰 · 900 × 1400</option><option value="1600,2400">고해상도 · 1600 × 2400</option><option value="2480,3508">A4 · 2480 × 3508</option><option value="1080,1080">정사각형 · 1080 × 1080</option><option value="8000,8000">최대 크기 · 8000 × 8000</option></select><div class="prop-row"><div class="prop-field"><label for="new-width">가로 (px)</label><input id="new-width" type="number" min="1" max="8000" value="${page().width}"></div><div class="prop-field"><label for="new-height">세로 (px)</label><input id="new-height" type="number" min="1" max="8000" value="${page().height}"></div></div><p>각 변 1–8000 px · 그림과 말풍선의 위치·크기는 유지됩니다.<br>캔버스 밖으로 나간 부분은 내보내기에 포함되지 않습니다.</p>`,`<button class="quiet" data-action="close-modal">취소</button><button class="primary" data-action="apply-canvas-size">크기 적용</button>`);
+  }
   function pageDialog(isNew=false) {modal(isNew?'새로운 이야기 시작':'페이지 추가',`<p>${isNew?'현재 작업은 프로젝트 파일로 저장해 두세요.':'새 페이지의 크기를 정하세요. 페이지마다 다른 크기를 사용할 수 있어요.'}</p>${isNew?'<label for="new-name">프로젝트 이름</label><input id="new-name" value="나의 첫 번째 이야기">':''}<label for="page-preset">캔버스 프리셋</label><select id="page-preset"><option value="900,1400">웹툰 · 900 × 1400</option><option value="800,1280">웹툰 · 800 × 1280</option><option value="1600,2400">고해상도 · 1600 × 2400</option><option value="2480,3508">A4 · 2480 × 3508</option><option value="1080,1080">정사각형 · 1080 × 1080</option><option value="8000,8000">최대 크기 · 8000 × 8000</option></select><div class="prop-row"><div class="prop-field"><label for="new-width">가로 (px)</label><input id="new-width" type="number" min="1" max="8000" value="${isNew?900:page().width}"></div><div class="prop-field"><label for="new-height">세로 (px)</label><input id="new-height" type="number" min="1" max="8000" value="${isNew?1400:page().height}"></div></div><p>각 변 1–8000 px · 크기는 나중에도 변경할 수 있습니다.</p>`,`<button class="quiet" data-action="close-modal">취소</button><button class="primary" data-action="${isNew?'create-project':'create-page'}">${isNew?'새 작업 시작':'페이지 추가'}</button>`);}
   function safeName(name){return String(name).replace(/[<>:"/\\|?*\x00-\x1f]/g,'_').replace(/[. ]+$/,'').slice(0,100)||'Panel Studio';}
   async function download(blob,name) {
@@ -251,8 +351,7 @@
   async function openProject(file) {
     try {
       if(file.size>512*1024*1024)throw Error('프로젝트 파일은 512MB 이하만 열 수 있습니다.');
-      const doc=validateProject(JSON.parse(await file.text()));await registerFonts(doc.fonts||[]);
-      for(const f of doc.fonts||[])if(!fonts.some(x=>x.name===f.name))fonts.push(f);
+      const doc=validateProject(JSON.parse(await file.text()));resolveFontConflicts(doc,doc.pages.flatMap(p=>p.objects));await addFontFaces(doc.fonts||[]);
       clearImageURLs();project=doc;project.fonts||=[];selected=null;mode='normal';history=[];historyIndex=-1;commit();renderLibrary();render();fit();toast('프로젝트를 불러왔습니다.');
     }catch(e){toast('열기 실패: '+e.message);}
   }
@@ -261,13 +360,13 @@
     await document.fonts.ready;
     const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(p.width*scale));canvas.height=Math.max(1,Math.round(p.height*scale));
     const ctx=canvas.getContext('2d');ctx.scale(scale,scale);if(!transparent){ctx.fillStyle=p.background;ctx.fillRect(0,0,p.width,p.height);}
-    const paint=(path,o)=>{ctx.lineJoin='round';if(!o.transparent){ctx.fillStyle=o.fill||'#ffffff';ctx.fill(path);}if(o.strokeWidth){ctx.strokeStyle=o.stroke;ctx.lineWidth=o.strokeWidth;ctx.stroke(path);}};
+    const paint=(path,o)=>{ctx.lineJoin=o.shape==='caption'?'miter':'round';if(!o.transparent){ctx.fillStyle=o.fill||'#ffffff';ctx.fill(path);}if(o.strokeWidth){ctx.strokeStyle=o.stroke;ctx.lineWidth=o.strokeWidth;ctx.stroke(path);}};
     for(const o of p.objects) {
       if(o.visible===false)continue;
       ctx.save();ctx.globalAlpha=o.opacity??1;ctx.translate(o.x+o.w/2,o.y+o.h/2);ctx.rotate((o.rotation||0)*Math.PI/180);ctx.translate(-o.w/2,-o.h/2);
       if(o.type==='bubble') {
         if(o.shape==='whisper')ctx.setLineDash([7,6]);paint(new Path2D(bubblePath(o)),o);ctx.setLineDash([]);
-        if(o.shape==='thought'&&o.tail!==false){const t=tailGeometry(o);for(let i=1;i<=3;i++){const f=i/3,r=(4-i)*Math.max(4,o.tailWidth/8),path=new Path2D();path.ellipse(t.base.x+(t.tip.x-t.base.x)*f,t.base.y+(t.tip.y-t.base.y)*f,r,r*.75,0,0,Math.PI*2);paint(path,o);}}
+        if(o.shape==='thought')for(const p of thoughtTail(o)){const path=new Path2D();path.ellipse(p.x,p.y,p.rx,p.ry,0,0,Math.PI*2);paint(path,o);}
       }
       if(['bubble','text','sfx'].includes(o.type)) {
         ctx.save();ctx.transform(1,0,Math.tan((o.skew||0)*Math.PI/180),1,0,0);ctx.font=fontStyle(o);ctx.textBaseline='alphabetic';ctx.letterSpacing=(o.letterSpacing||0)+'px';
@@ -338,6 +437,22 @@
   async function action(name) {
     const o=object();
     if(name==='close-modal'){if(!exporting)$('#modal').close();return;}
+    if(name==='canvas-size')return canvasSizeDialog();
+    if(name==='apply-canvas-size') {
+      const w=+$('#new-width').value,h=+$('#new-height').value;
+      if(!Number.isInteger(w)||!Number.isInteger(h)||w<1||h<1||w>8000||h>8000){toast('가로와 세로를 1–8000 사이의 정수로 입력하세요.');return;}
+      page().width=w;page().height=h;$('#modal').close();commit();render();fit();return;
+    }
+    if(name==='new-material-bubbles'||name==='new-material-sfx')return materialDialog(name==='new-material-bubbles'?'bubbles':'sfx');
+    if(name==='save-material')return saveSelectedMaterial();
+    if(name==='create-material')return createMaterial();
+    if(name==='import-material-image'){materialImageCategory=tab==='sfx'?'sfx':'bubbles';$('#material-image-input').click();return;}
+    if(name==='import-materials'){$('#material-library-input').click();return;}
+    if(name==='export-materials')return exportMaterialLibrary();
+    if(name==='confirm-delete-material') {
+      materialLibrary=MaterialLibrary.remove(materialLibrary,materialToDelete);materialToDelete=null;$('#modal').close();renderLibrary();
+      if(await persistMaterials())toast('내 소재에서 삭제했습니다. 캔버스에 놓은 소재는 유지됩니다.');return;
+    }
     if(name==='undo')return undo(-1);if(name==='redo')return undo(1);
     if(name==='save')return saveProject();if(name==='export')return exportDialog();if(name==='do-export')return exportFiles();
     if(name==='open')return confirmAction('프로젝트 열기','현재 작업을 파일로 저장했다면 새 프로젝트를 열어 주세요.','confirm-open');
@@ -358,7 +473,7 @@
     if(name==='grid'){showGrid=!showGrid;renderStage();renderContext();return;}if(name==='snap'){snap=!snap;renderContext();return;}
     if(name==='preview'){preview=!preview;renderStage();renderContext();return;}
     if(name==='import-image'){$('#image-input').click();return;}if(name==='import-font'){$('#font-input').click();return;}
-    if(name==='help')return modal('작업실 사용 가이드',`<p>모든 편집은 이 기기에서 처리됩니다. 먼저 왼쪽 소재를 추가하고, 오른쪽 속성에서 세밀하게 다듬어 보세요.</p>${[['선택 / 펜 / 화면 이동','V / B / H'],['드래그로 화면 이동','Space + 드래그'],['실행 취소 / 다시 실행','Ctrl+Z / Ctrl+Shift+Z'],['프로젝트 저장 / 열기','Ctrl+S / Ctrl+O'],['이미지 내보내기','Ctrl+E'],['복제 / 복사 / 붙여넣기','Ctrl+D / Ctrl+C / Ctrl+V'],['레이어 이동 / 빠른 이동','방향키 / Shift+방향키'],['비율 유지하여 크기 조절','Shift + 모서리 드래그'],['삭제 / 선택 해제','Delete / Esc'],['화면 확대·축소','Ctrl + 마우스 휠']].map(([a,b])=>`<div class="kbd-row"><span>${a}</span><span class="kbd">${b}</span></div>`).join('')}<p style="margin-top:18px"><b>말풍선 꼬리:</b> 말풍선 선택 → 꼬리 편집 → 끝점·붙는 위치·휘어짐 점 드래그.<br><b>이미지:</b> 모양 편집으로 꼭짓점을 움직이고, 테두리를 더블클릭해 점을 추가하세요. ‘구도 이동’은 잘린 영역 안의 사진만 이동합니다.<br><b>저장:</b> 자동 저장은 이 기기의 최근 작업 한 개를 보관합니다. 파일 보관·다른 PC 이동에는 ‘프로젝트 저장’을 사용하세요.<br><b>글꼴:</b> 11종의 기본 한글 글꼴과 TTF/OTF/WOFF 추가를 지원합니다. 글꼴 재배포는 해당 라이선스를 따라 주세요.<br><b>GIF:</b> 정지 이미지로 편집·내보내기됩니다.</p>`,`<button class="primary" data-action="close-modal">작업 시작</button>`);
+    if(name==='help')return modal('작업실 사용 가이드',`<p>모든 편집은 이 기기에서 처리됩니다. 먼저 왼쪽 소재를 추가하고, 오른쪽 속성에서 세밀하게 다듬어 보세요.</p>${[['선택 / 펜 / 화면 이동','V / B / H'],['드래그로 화면 이동','Space + 드래그'],['실행 취소 / 다시 실행','Ctrl+Z / Ctrl+Shift+Z'],['프로젝트 저장 / 열기','Ctrl+S / Ctrl+O'],['이미지 내보내기','Ctrl+E'],['복제 / 복사 / 붙여넣기','Ctrl+D / Ctrl+C / Ctrl+V'],['레이어 이동 / 빠른 이동','방향키 / Shift+방향키'],['비율 유지하여 크기 조절','Shift + 모서리 드래그'],['삭제 / 선택 해제','Delete / Esc'],['화면 확대·축소','Ctrl + 마우스 휠']].map(([a,b])=>`<div class="kbd-row"><span>${a}</span><span class="kbd">${b}</span></div>`).join('')}<p style="margin-top:18px"><b>캔버스 크기:</b> 상단 ‘캔버스 크기’에서 가로·세로를 변경합니다. 최대 8000 × 8000 px입니다.<br><b>텍스트만:</b> 상단 ‘텍스트만 추가’를 누르면 말풍선 없는 글자를 넣습니다.<br><b>내 소재:</b> 말풍선·효과음 탭에서 직접 만들거나 선택한 소재를 저장하세요. ‘내 그림 불러오기’로 투명 PNG 등도 추가할 수 있습니다. 그림 소재는 이미지로 편집됩니다. 내 소재는 프로젝트와 별도로 이 기기에 보관됩니다. 다른 PC에서는 ‘내 소재 내보내기’와 ‘소재 파일 불러오기’를 사용하세요.<br><b>말풍선 꼬리:</b> 말풍선 선택 → 꼬리 편집 → 끝점·붙는 위치·휘어짐 점 드래그.<br><b>이미지:</b> 모양 편집으로 꼭짓점을 움직이고, 테두리를 더블클릭해 점을 추가하세요. ‘구도 이동’은 잘린 영역 안의 사진만 이동합니다.<br><b>저장:</b> 자동 저장은 이 기기의 최근 작업 한 개를 보관합니다. 파일 보관·다른 PC 이동에는 ‘프로젝트 저장’을 사용하세요.<br><b>글꼴:</b> 11종의 기본 한글 글꼴과 TTF/OTF/WOFF 추가를 지원합니다. 글꼴 재배포는 해당 라이선스를 따라 주세요.<br><b>GIF:</b> 정지 이미지로 편집·내보내기됩니다.</p>`,`<button class="primary" data-action="close-modal">작업 시작</button>`);
     if(name==='duplicate')return duplicateObject();
     if(['bring-front','send-back','forward','backward'].includes(name))return reorder(name);
     if(!o||o.locked)return;
@@ -379,8 +494,10 @@
     if(b?.dataset.view){view=b.dataset.view;renderStage();renderContext();return;}
     if(b?.dataset.pageSelect){choosePage(b.dataset.pageSelect);return;}
     if(b?.dataset.addBubble){addObject(place(bubble(b.dataset.addBubble)));return;}
+    if(b?.dataset.addMaterial){addMaterial(b.dataset.addMaterial);return;}
+    if(b?.dataset.deleteMaterial){const item=materialLibrary.items.find(i=>i.id===b.dataset.deleteMaterial);if(item){materialToDelete=item.id;confirmAction('내 소재 삭제',`‘${item.name}’을 내 소재에서 삭제합니다. 캔버스에 놓은 소재는 유지됩니다.`,'confirm-delete-material');}return;}
     if(b?.dataset.addSfx!==undefined){const [text,font,color,skew]=sfxPresets[+b.dataset.addSfx];addObject(place(textObject(text,{type:'sfx',name:text,font,color,fontSize:100,weight:700,w:Math.min(550,page().width*.7),h:210,skew,textStroke:'#ffffff',textStrokeWidth:3,align:'center'})));return;}
-    if(b?.dataset.addText){const kind=b.dataset.addText;addObject(place(textObject(kind==='title'?'새로운 이야기':kind==='hand'?'마음을 담은 한 줄':'이곳에 이야기를 써 내려가세요.',{fontSize:kind==='title'?56:kind==='hand'?52:28,font:kind==='hand'?'Nanum Pen Script':'Nanum Gothic',weight:kind==='title'?700:400})));return;}
+    if(b?.dataset.addText){const kind=b.dataset.addText;addObject(place(textObject(kind==='title'?'새로운 이야기':kind==='hand'?'마음을 담은 한 줄':'이곳에 이야기를 써 내려가세요.',{fontSize:kind==='title'?56:kind==='hand'?52:28,font:kind==='hand'?'Nanum Pen Script':'Nanum Gothic',weight:kind==='title'?700:400})));if(b.dataset.quickText){$('[data-prop="text"]')?.focus();$('[data-prop="text"]')?.select();}return;}
     if(b?.dataset.fontText){addObject(place(textObject(fontNames[b.dataset.fontText]||'새로운 이야기',{font:b.dataset.fontText})));return;}
     if(b?.dataset.demoImage){const a=window.DEMO_ASSETS.find(a=>a.id===b.dataset.demoImage);if(a)await addImageAsset(a);return;}
     if(b?.dataset.addPanel){const crop=b.dataset.addPanel;addObject(place(base('shape',{crop,shape:crop,points:clone(crops[crop]||crops.rectangle),w:page().width*.7,h:page().width*.5,fill:'#ffffff',stroke:'#23352f',strokeWidth:5,transparent:true})));return;}
@@ -395,6 +512,8 @@
   $('#modal').addEventListener('change',e=>{if(e.target.id==='page-preset'){const [w,h]=e.target.value.split(',');$('#new-width').value=w;$('#new-height').value=h;}if(e.target.id==='export-scope'){$('#export-format').disabled=e.target.value==='strip';if(e.target.value==='strip')$('#export-format').value='png';}});
   $('#image-input').addEventListener('change',async e=>{await importImages(e.target.files);e.target.value='';});
   $('#font-input').addEventListener('change',async e=>{await importFonts(e.target.files);e.target.value='';});
+  $('#material-image-input').addEventListener('change',async e=>{await importMaterialImages(e.target.files);e.target.value='';});
+  $('#material-library-input').addEventListener('change',async e=>{if(e.target.files[0])await importMaterialLibrary(e.target.files[0]);e.target.value='';});
   $('#project-input').addEventListener('change',async e=>{if(e.target.files[0])await openProject(e.target.files[0]);e.target.value='';});
   const viewport=$('#stage-viewport');
   viewport.addEventListener('pointerdown',e=>{
@@ -464,16 +583,19 @@
     const o=object();if(o&&!o.locked&&['arrowleft','arrowright','arrowup','arrowdown'].includes(key)){e.preventDefault();const d=e.shiftKey?10:1;o.x+=key==='arrowleft'?-d:key==='arrowright'?d:0;o.y+=key==='arrowup'?-d:key==='arrowdown'?d:0;commit();renderStage();renderProperties();}
   });
   document.addEventListener('keyup',e=>{if(e.code==='Space')space=false;});window.addEventListener('blur',()=>{space=false;finishDrag();});
-  window.addEventListener('beforeunload',e=>{if(dirty){saveLocal();e.preventDefault();e.returnValue='';}});
-  document.addEventListener('visibilitychange',()=>{if(document.hidden&&dirty)saveLocal();});
+  window.addEventListener('beforeunload',e=>{if(dirty||materialDirty){if(dirty)saveLocal();if(materialDirty)persistMaterials();e.preventDefault();e.returnValue='';}});
+  document.addEventListener('visibilitychange',()=>{if(document.hidden){if(dirty)saveLocal();if(materialDirty)persistMaterials();}});
   async function init() {
     project=freshProject(true);
-    try {const db=await getDB(),saved=await new Promise((resolve,reject)=>{const r=db.transaction('documents').objectStore('documents').get('autosave');r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});if(saved)project=validateProject(saved);}catch(e){console.warn('자동 저장 복원:',e.message);}
-    project.fonts||=[];fonts.push(...project.fonts);await registerFonts(fonts);await document.fonts.ready;
+    const readStored=async key=>{const db=await getDB();return new Promise((resolve,reject)=>{const r=db.transaction('documents').objectStore('documents').get(key);r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);});};
+    try{const saved=await readStored('autosave');if(saved)project=validateProject(saved);}catch(e){console.warn('자동 저장 복원:',e.message);}
+    project.fonts||=[];resolveFontConflicts(project,project.pages.flatMap(p=>p.objects));await addFontFaces(project.fonts);
+    try{const saved=await readStored('materials');if(saved){materialLibrary=MaterialLibrary.validate(saved);resolveFontConflicts(materialLibrary,materialLibrary.items.map(i=>i.template));await addFontFaces(materialLibrary.fonts);}}catch(e){materialLibrary=MaterialLibrary.empty();toast('내 소재를 복원하지 못했습니다. 내보낸 소재 파일을 불러와 주세요.');}
+    await registerFonts(fonts.filter(f=>bundledFontNames.has(f.name)));await document.fonts.ready;
     booting=false;commit();renderLibrary();render();fit();
     document.body.dataset.ready='true';
   }
   // Read-only state snapshots and rendering hooks for integration tests and tooling.
-  window.PanelStudio={getProject:()=>clone(portableProject()),getSelection:()=>selected,renderPage:(index=0)=>rasterize(project.pages[index]),validateProject};
+  window.PanelStudio={getProject:()=>clone(portableProject()),getSelection:()=>selected,getMaterials:()=>clone(materialLibrary),materialsSaved:()=>!materialDirty,renderPage:(index=0)=>rasterize(project.pages[index]),validateProject};
   init().catch(e=>{console.error(e);toast('작업실을 시작하지 못했습니다: '+e.message);});
 })();

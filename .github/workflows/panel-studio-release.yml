@@ -1,7 +1,7 @@
 name: Publish Panel Studio Windows
 on:
   push:
-    branches: [panel-studio-release-v1.0.0]
+    branches: [panel-studio-release-v1.1.0]
     paths: [package.json, scripts/publish-release.cjs]
   workflow_dispatch:
 permissions:
@@ -19,7 +19,7 @@ jobs:
           node-version: '24'
           cache: npm
       - run: npm ci --ignore-scripts --no-audit --no-fund
-      - run: node --test tests/geometry.test.cjs
+      - run: node --test tests/*.test.cjs
       - run: npm run package:win
       - name: Verify and publish release assets
         run: node scripts/publish-release.cjs

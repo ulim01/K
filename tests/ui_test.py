@@ -107,7 +107,7 @@ with sync_playwright() as pw:
     page.locator('[data-tool="select"]').click()
     ok('8000px canvas, multi-page and continuous views, resize, freehand drawing')
     font_file=ROOT/'assets/fonts/GamjaFlower-Regular.ttf'
-    page.locator('[data-tab="text"]').click();page.locator('[data-add-text="body"]').click()
+    page.locator('[data-tab="text"]').click();page.locator('[data-add-text="body"]').first.click()
     page.locator('#font-input').set_input_files(str(font_file))
     wait('PanelStudio.getProject().fonts.length===1')
     prop('text','내 글꼴도 저장됩니다')
@@ -170,7 +170,7 @@ with sync_playwright() as pw:
     max_image.close()
     ok('maximum 8000 × 8000 PNG exports with rendered Korean text')
     # Previously loaded custom fonts must remain portable when used in a new document.
-    page.locator('[data-tab="text"]').click();page.locator('[data-add-text="body"]').click()
+    page.locator('[data-tab="text"]').click();page.locator('[data-add-text="body"]').first.click()
     custom_name=saved['fonts'][0]['name'];page.locator('[data-prop="font"]').select_option(custom_name)
     assert state()['fonts'][0]['name']==custom_name
     ok('custom font reused in a different document stays embedded')

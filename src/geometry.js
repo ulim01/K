@@ -7,12 +7,20 @@
   function perimeter(shape, w, h, a) {
     let x, y;
     const c = Math.cos(a), s = Math.sin(a);
-    if (['round','box','caption'].includes(shape)) {
+    if (shape === 'caption') {
+      const radius=1/Math.max(Math.abs(c),Math.abs(s)); x=c*radius; y=s*radius;
+    } else if (['round','box'].includes(shape)) {
       const power = shape === 'round' ? .42 : .13;
       x = Math.sign(c) * Math.abs(c) ** power; y = Math.sign(s) * Math.abs(s) ** power;
-    } else if (shape === 'cloud' || shape === 'thought') {
-      const r = .94 + .06 * Math.cos(a * 12);
-      x = c * r; y = s * r;
+    } else if (shape === 'cloud') {
+      // The outer edge of eight overlapping circular lobes makes broad, soft puffs.
+      let radius=.72;
+      for(let i=0;i<8;i++) {
+        const angle=i*Math.PI/4, cx=.64*Math.cos(angle), cy=.64*Math.sin(angle);
+        const projection=cx*c+cy*s, discriminant=.36**2-(cx*cx+cy*cy-projection*projection);
+        if(discriminant>=0)radius=Math.max(radius,projection+Math.sqrt(discriminant));
+      }
+      x=c*radius; y=s*radius;
     } else if (shape === 'burst') {
       const wave = Math.abs(((a / (Math.PI * 2) * 18) % 1 + 1) % 1 - .5) * 2;
       const r = .8 + .2 * wave; x = c * r; y = s * r;
@@ -30,6 +38,7 @@
     return {a,delta,start,end,base,tip,control};
   }
   function bubblePath(o) {
+    if(o.shape==='caption')return `M0,0 L${num(o.w)},0 L${num(o.w)},${num(o.h)} L0,${num(o.h)} Z`;
     const tail = o.tail !== false && o.shape !== 'caption' && o.shape !== 'thought';
     const t=tailGeometry(o), steps=o.shape==='burst'?288:192;
     const a0=tail?t.a+t.delta:0, length=tail?Math.PI*2-t.delta*2:Math.PI*2;
@@ -43,6 +52,14 @@
       d+=` Q${point({x:t.control.x+v.x,y:t.control.y+v.y})} ${point(t.tip)} Q${point({x:t.control.x-v.x,y:t.control.y-v.y})} ${point(t.start)}`;
     }
     return d+' Z';
+  }
+  function thoughtTail(o) {
+    if(o.tail===false)return [];
+    const t=tailGeometry(o);
+    return [1,2,3].map(i=>{
+      const f=i/3,u=1-f,r=(4-i)*Math.max(1.25,(o.tailWidth||34)/8);
+      return {x:u*u*t.base.x+2*u*f*t.control.x+f*f*t.tip.x,y:u*u*t.base.y+2*u*f*t.control.y+f*f*t.tip.y,rx:r,ry:r*.78};
+    });
   }
   function polygonPath(points,w,h) {return points.map((p,i)=>`${i?'L':'M'}${num(p[0]*w)},${num(p[1]*h)}`).join(' ')+' Z';}
   const crops={rectangle:[[0,0],[1,0],[1,1],[0,1]],trapezoid:[[.16,0],[.84,0],[1,1],[0,1]],parallelogram:[[.2,0],[1,0],[.8,1],[0,1]],diamond:[[.5,0],[1,.5],[.5,1],[0,.5]],triangle:[[.5,0],[1,1],[0,1]],hexagon:[[.25,0],[.75,0],[1,.5],[.75,1],[.25,1],[0,.5]]};
@@ -66,15 +83,16 @@
     const ids=new Set(),types=['bubble','text','sfx','image','shape','pen','effect'];
     for(const page of p.pages) {
       if(!page || !Number.isInteger(page.width)||!Number.isInteger(page.height)||page.width<1||page.height<1||page.width>8000||page.height>8000||!Array.isArray(page.objects)||page.objects.length>3000) throw Error('페이지 크기 또는 레이어 수가 올바르지 않습니다.');
-      if(!/^[\w-]{1,80}$/.test(page.id)||ids.has(page.id)) throw Error('페이지 ID가 올바르지 않습니다.');
+      if(typeof page.id!=='string'||!/^[\w-]{1,80}$/.test(page.id)||ids.has(page.id)) throw Error('페이지 ID가 올바르지 않습니다.');
       ids.add(page.id);
       if(!/^#[\da-f]{6}$/i.test(page.background)) throw Error('배경색이 올바르지 않습니다.');
       for(const o of page.objects) {
-        if(!o||!types.includes(o.type)||!/^[\w-]{1,80}$/.test(o.id)||ids.has(o.id)) throw Error('레이어 형식이 올바르지 않습니다.');
+        if(!o||!types.includes(o.type)||typeof o.id!=='string'||!/^[\w-]{1,80}$/.test(o.id)||ids.has(o.id)) throw Error('레이어 형식이 올바르지 않습니다.');
         ids.add(o.id);
         for(const k of ['x','y','w','h']) if(!Number.isFinite(o[k])||Math.abs(o[k])>100000) throw Error('레이어 좌표가 올바르지 않습니다.');
         if(o.w<1||o.h<1) throw Error('레이어 크기가 올바르지 않습니다.');
-        if(o.text && (typeof o.text!=='string'||o.text.length>20000)) throw Error('텍스트가 너무 깁니다.');
+        if(o.text!==undefined && (typeof o.text!=='string'||o.text.length>20000)) throw Error('텍스트가 올바르지 않습니다.');
+        for(const k of ['font','name','shape','crop','align','effect'])if(o[k]!==undefined&&(typeof o[k]!=='string'||o[k].length>200))throw Error('레이어 이름 또는 스타일이 올바르지 않습니다.');
         for(const k of ['fill','stroke','color','textStroke']) if(o[k]&&!/^#[\da-f]{6}$/i.test(o[k])) throw Error('레이어 색상이 올바르지 않습니다.');
         const bounds={rotation:[-36000,36000],opacity:[0,1],strokeWidth:[0,200],fontSize:[1,1500],weight:[100,900],lineHeight:[.5,4],letterSpacing:[-50,200],textStrokeWidth:[0,100],padding:[0,2000],tailX:[-100,100],tailY:[-100,100],bendX:[-100,100],bendY:[-100,100],tailAngle:[-36000,36000],tailWidth:[1,2000],imageZoom:[.1,20],imageX:[-10,10],imageY:[-10,10],fade:[0,1],fadeAngle:[-36000,36000],fadeStart:[0,.99],skew:[-60,60],density:[5,150],seed:[0,100000]};
         for(const [key,[lo,hi]] of Object.entries(bounds)) if(o[key]!==undefined&&(!Number.isFinite(o[key])||o[key]<lo||o[key]>hi)) throw Error(`레이어 속성이 올바르지 않습니다: ${key}`);
@@ -87,8 +105,9 @@
     }
     for(const page of p.pages) for(const o of page.objects) if(o.type==='image'&&!Object.hasOwn(p.assets,o.assetId)) throw Error('이미지 파일이 누락되었습니다.');
     if(p.fonts && (!Array.isArray(p.fonts)||p.fonts.length>100||p.fonts.some(f=>!f||typeof f.name!=='string'||typeof f.data!=='string'||!/^data:(font\/[\w.-]+|application\/[\w.-]+);base64,[\w+/=]+$/.test(f.data)))) throw Error('글꼴 데이터가 올바르지 않습니다.');
+    for(const f of p.fonts||[])if(!f.name.trim()||f.name.length>200||(f.weight!==undefined&&(!Number.isFinite(f.weight)||f.weight<100||f.weight>900)))throw Error('글꼴 이름 또는 굵기가 올바르지 않습니다.');
     return p;
   }
-  const api={clamp,esc,num,point,perimeter,tailGeometry,bubblePath,polygonPath,crops,wrapText,localPoint,validateProject};
+  const api={clamp,esc,num,point,perimeter,tailGeometry,thoughtTail,bubblePath,polygonPath,crops,wrapText,localPoint,validateProject};
   if(typeof module!=='undefined') module.exports=api; else root.G=api;
 })(typeof window!=='undefined'?window:globalThis);

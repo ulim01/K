@@ -5,9 +5,11 @@ const crypto=require('node:crypto');
 (async()=>{
   const {packager}=await import('@electron/packager');
   const root=path.resolve(__dirname,'..'),out=path.join(root,'releases');
-  const paths=await packager({dir:root,out,name:'Panel Studio',executableName:'Panel Studio',platform:'win32',arch:'x64',electronVersion:'45.2.3',appVersion:'1.0.0',appCopyright:'Panel Studio',icon:path.join(root,'assets/icon.ico'),asar:true,overwrite:true,prune:true,win32metadata:{CompanyName:'Panel Studio',FileDescription:'Panel Studio · 웹툰 작업실'},ignore:[/^\/(releases|test-results|tests|scripts|node_modules|\.github|\.git)(\/|$)/,/^\/\d+\.png$/,/^\/assets\/fonts\/.*\.(ttf|woff2?|json)$/,/^\/(README\.md|package-lock\.json|requirements-dev\.txt)$/]});
+  const version=JSON.parse(await fs.readFile(path.join(root,'package.json'),'utf8')).version;
+  if(!/^\d+\.\d+\.\d+$/.test(version))throw Error('Invalid release version');
+  const paths=await packager({dir:root,out,name:'Panel Studio',executableName:'Panel Studio',platform:'win32',arch:'x64',electronVersion:'45.2.3',appVersion:version,appCopyright:'Panel Studio',icon:path.join(root,'assets/icon.ico'),asar:true,overwrite:true,prune:true,win32metadata:{CompanyName:'Panel Studio',FileDescription:'Panel Studio · 웹툰 작업실'},ignore:[/^\/(releases|test-results|tests|scripts|node_modules|\.github|\.git)(\/|$)/,/^\/\d+\.png$/,/^\/assets\/fonts\/.*\.(ttf|woff2?|json)$/,/^\/(README\.md|package-lock\.json|requirements-dev\.txt)$/]});
   await fs.copyFile(path.join(root,'사용설명서.txt'),path.join(paths[0],'먼저 읽어주세요.txt'));
-  const zip=path.join(out,'Panel-Studio-1.0.0-Windows-x64.zip');
+  const zip=path.join(out,`Panel-Studio-${version}-Windows-x64.zip`);
   await fs.rm(zip,{force:true});
   execFileSync('zip',['-q','-r','-9',zip,path.basename(paths[0])],{cwd:out,stdio:'inherit'});
   const hash=crypto.createHash('sha256').update(await fs.readFile(zip)).digest('hex');

@@ -6,6 +6,7 @@
   <meta http-equiv="Content-Security-Policy" content="default-src 'self' data: blob:; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' data: blob:; object-src 'none'; base-uri 'none'">
   <title>Panel Studio · 나만의 웹툰 작업실</title>
   <link rel="stylesheet" href="src/style.css">
+  <link rel="stylesheet" href="src/materials.css">
 </head>
 <body>
   <header class="topbar">
@@ -33,6 +34,10 @@
         <div class="view-switch" role="group" aria-label="페이지 보기"><button data-view="page" class="active">▣ 한 장씩</button><button data-view="scroll">▥ 이어 보기</button></div>
         <div class="tool-group"><button data-action="grid" class="tool" id="grid-button" title="격자 표시" aria-label="격자 표시">▦</button><button data-action="snap" class="tool" id="snap-button" title="10px 격자 맞춤" aria-label="격자 맞춤">⌗</button><button data-action="preview" class="quiet" id="preview-button">미리 보기</button></div>
       </div>
+      <div class="creationbar">
+        <button class="canvas-size-button" data-action="canvas-size" aria-label="캔버스 크기 변경"><span class="canvas-size-icon">▱</span><span><strong>캔버스 크기</strong><small id="canvas-size-label">900 × 1400 px</small></span><span class="canvas-change">변경 ↗</span></button>
+        <button class="add-text-button" data-add-text="body" data-quick-text="true"><span>T</span> 텍스트만 추가</button>
+      </div>
       <div class="contextbar"><span id="context-hint">소재를 선택하면 캔버스에 추가됩니다.</span><div id="context-actions"></div></div>
       <div id="stage-viewport" class="stage-viewport"><div id="stage" class="stage"></div></div>
       <footer class="statusbar"><span id="page-status">PAGE 01</span><span id="dimensions">900 × 1400 px</span><span class="status-spacer"></span><button data-action="previous-page" aria-label="이전 페이지">‹</button><span id="page-position">1 / 1</span><button data-action="next-page" aria-label="다음 페이지">›</button><div class="zoom-controls"><button data-action="zoom-out" aria-label="축소">−</button><button data-action="fit" id="zoom-label" title="화면에 맞추기">50%</button><button data-action="zoom-in" aria-label="확대">＋</button><button data-action="fit" title="화면에 맞추기">⛶</button></div></footer>
@@ -42,12 +47,15 @@
   <input type="file" id="image-input" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden>
   <input type="file" id="project-input" accept=".json,.panel,.panel.json" hidden>
   <input type="file" id="font-input" accept=".ttf,.otf,.woff,.woff2" multiple hidden>
+  <input type="file" id="material-image-input" accept="image/png,image/jpeg,image/webp,image/gif,image/bmp" multiple hidden>
+  <input type="file" id="material-library-input" accept=".json" hidden>
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
   <dialog id="modal"><div id="modal-content"></div></dialog>
   <script src="vendor/jszip.min.js"></script>
   <script src="assets/fonts/fonts.js"></script>
   <script src="assets/demo/demo.js"></script>
   <script src="src/geometry.js"></script>
+  <script src="src/material-library.js"></script>
   <script src="src/app.js"></script>
 </body>
 </html>
