@@ -2,10 +2,11 @@
 (() => {
   'use strict';
   const $=s=>document.querySelector(s), $$=s=>Array.from(document.querySelectorAll(s));
-  const {clamp,esc,num,bubblePath,polygonPath,tailGeometry,thoughtTail,localPoint,wrapText,crops,imagePlacement,resizeImage,validateProject}=G;
+  const {clamp,esc,num,bubblePath,polygonPath,tailGeometry,thoughtTail,dottedTail,textAreas,localPoint,wrapText,crops,imagePlacement,resizeImage,validateProject}=G;
   const uid=()=> 'p'+crypto.getRandomValues(new Uint32Array(2)).join('');
   const clone=o=>JSON.parse(JSON.stringify(o));
-  const labels={ellipse:'타원형',round:'둥근 사각형',cloud:'구름형',burst:'외침',thought:'생각',box:'사각형',whisper:'속삭임',caption:'내레이션'};
+  const basicLabels={ellipse:'타원형',round:'둥근 사각형',cloud:'구름형',burst:'외침',thought:'생각',box:'사각형',whisper:'속삭임',caption:'내레이션'};
+  const labels={...basicLabels,...Object.fromEntries(BubbleCatalog.presets.map(p=>[p.id,`${p.collection}-${String(p.number).padStart(2,'0')} · ${p.name}`]))};
   const cropLabels={rectangle:'사각형',trapezoid:'사다리꼴',parallelogram:'평행사변형',diamond:'마름모',triangle:'삼각형',hexagon:'육각형',ellipse:'타원',custom:'자유 다각형'};
   const typeLabels={bubble:'말풍선',sfx:'효과음',text:'텍스트',image:'이미지',shape:'컷',pen:'펜',effect:'효과선'};
   const fontNames={'Nanum Gothic':'나눔고딕','Nanum Myeongjo':'나눔명조','Black Han Sans':'검은고딕','Do Hyeon':'도현','Jua':'주아','Gowun Dodum':'고운돋움','Gowun Batang':'고운바탕','Nanum Pen Script':'나눔손글씨 펜','Nanum Brush Script':'나눔손글씨 붓','Gaegu':'개구','Gamja Flower':'감자꽃'};
@@ -14,6 +15,7 @@
   let project,selected=null,tab='bubbles',view='page',tool='select',mode='normal',zoom=.5,showGrid=false,snap=true,preview=false;
   let history=[],historyIndex=-1,drag=null,space=false,clipboard=null,autosaveTimer,toastTimer,dbPromise,dirty=false,saveGeneration=0;
   let penColor='#253b30',penWidth=6,exporting=false,booting=true;
+  let bubbleCollection='basic',rotationGuide=null;
   let guides=[],frameImportTarget=null,framePickerTarget=null,dropFrameId=null;
   let materialLibrary=MaterialLibrary.empty(),materialDirty=false,materialImageCategory='bubbles',materialToDelete=null,materialSaveGeneration=0,materialDraft=null;
   const fonts=[...(window.BUNDLED_FONTS||[])];
@@ -31,7 +33,10 @@
   const object=()=>page().objects.find(o=>o.id===selected);
   const hasImage=o=>Boolean(o&&(o.type==='image'||o.type==='shape')&&o.assetId&&project.assets[o.assetId]);
   function base(type,extra={}) {return {id:uid(),type,name:typeLabels[type],x:100,y:180,w:300,h:180,rotation:0,opacity:1,visible:true,locked:false,...extra};}
-  function bubble(shape='ellipse',extra={}) {return base('bubble',{shape,fill:'#ffffff',stroke:'#243b31',strokeWidth:3,text:'여기에 대사를\n입력하세요.',font:'Nanum Gothic',fontSize:30,weight:400,color:'#23352f',align:'center',lineHeight:1.45,padding:25,tail:shape!=='caption',tailAngle:65,tailWidth:34,tailX:.92,tailY:1.5,bendX:0,bendY:0,...extra});}
+  function bubble(shape='ellipse',extra={}) {
+    const preset=BubbleCatalog.get(shape);
+    return base('bubble',{shape,fill:'#ffffff',stroke:'#243b31',strokeWidth:3,text:'여기에 대사를\n입력하세요.',font:'Nanum Gothic',fontSize:30,weight:400,color:'#23352f',align:'center',lineHeight:1.45,padding:25,tail:shape!=='caption',tailAngle:65,tailWidth:34,tailX:.92,tailY:1.5,bendX:0,bendY:0,...(preset?{w:preset.w,h:preset.h,name:preset.name,...preset.defaults,...(preset.regions?{text:'첫 번째 대사',text2:'두 번째 대사'}:{})}:{}),...extra});
+  }
   function textObject(text='새로운 이야기',extra={}) {return base('text',{text,font:'Nanum Gothic',fontSize:48,weight:400,color:'#23352f',align:'left',lineHeight:1.4,padding:0,letterSpacing:0,w:560,h:150,...extra});}
   function newPage(width=900,height=1400) {return {id:uid(),name:'새 페이지',width,height,background:'#ffffff',objects:[]};}
   function freshProject() {
@@ -173,15 +178,15 @@
     const textStroke=o.textStrokeWidth?`stroke="${esc(o.textStroke||'#ffffff')}" stroke-width="${o.textStrokeWidth}" paint-order="stroke fill" stroke-linejoin="round"`:'';
     return `<g transform="skewX(${num(o.skew||0)})"><text fill="${esc(o.color||'#23352f')}" font-family="${esc(o.font||'Nanum Gothic')}" font-size="${size}" font-weight="${o.weight||400}" font-style="${o.italic?'italic':'normal'}" letter-spacing="${spacing}" text-anchor="${align==='center'?'middle':align==='right'?'end':'start'}" ${textStroke}>${lines.map((line,i)=>`<tspan x="${num(x)}" y="${num(y+i*lh)}">${esc(line)||' '}</tspan>`).join('')}</text></g>`;
   }
-  function outline(o) {return `fill="${o.transparent?'none':esc(o.fill||'#ffffff')}" stroke="${esc(o.stroke||'#23352f')}" stroke-width="${o.strokeWidth||0}" stroke-linejoin="${o.shape==='caption'?'miter':'round'}"`;}
+  function outline(o) {return `fill="${o.transparent?'none':esc(o.fill||'#ffffff')}" stroke="${esc(o.stroke||'#23352f')}" stroke-width="${o.strokeWidth||0}" stroke-linejoin="${o.shape==='caption'?'miter':BubbleCatalog.get(o.shape)?.join||'round'}"`;}
   function clipShape(o) {return o.crop==='ellipse'?`<ellipse cx="${o.w/2}" cy="${o.h/2}" rx="${o.w/2}" ry="${o.h/2}"/>`:`<path d="${polygonPath(o.points||crops.rectangle,o.w,o.h)}"/>`;}
   function objectSVG(o,interactive=true,prefix='') {
     if(o.visible===false)return '';
     let inner='';const id=prefix+o.id;
     if(o.type==='bubble') {
       inner=`<path d="${bubblePath(o)}" ${outline(o)} ${o.shape==='whisper'?'stroke-dasharray="7 6"':''}/>`;
-      if(o.shape==='thought')inner+=thoughtTail(o).map(p=>`<ellipse cx="${p.x}" cy="${p.y}" rx="${p.rx}" ry="${p.ry}" ${outline(o)}/>`).join('');
-      inner+=textSVG(o);
+      if(dottedTail(o))inner+=thoughtTail(o).map(p=>`<ellipse cx="${p.x}" cy="${p.y}" rx="${p.rx}" ry="${p.ry}" ${outline(o)}/>`).join('');
+      inner+=textAreas(o).map(a=>`<g data-dialogue="${a.key}" transform="translate(${a.x} ${a.y})">${textSVG({...o,w:a.w,h:a.h,text:o[a.key]||''})}</g>`).join('');
     } else if(o.type==='text'||o.type==='sfx') inner=textSVG(o);
     else if(hasImage(o)) {
       const a=project.assets[o.assetId];if(!a)return '';
@@ -232,11 +237,21 @@
     const grid=interactive&&showGrid?`<defs><pattern id="grid-${p.id}" width="50" height="50" patternUnits="userSpaceOnUse"><path d="M50 0H0V50" fill="none" stroke="#55705e" stroke-opacity=".2" stroke-width="1"/></pattern></defs><rect width="100%" height="100%" fill="url(#grid-${p.id})" pointer-events="none"/>`:'';
     const used=new Set(p.objects.filter(o=>o.visible!==false).map(o=>o.font));
     const css=embedFonts?`<defs><style>${fonts.filter(f=>used.has(f.name)).map(f=>`@font-face{font-family:'${esc(f.name.replace(/['\\]/g,''))}';font-weight:${f.weight||400};src:url(${f.data})}`).join('')}</style></defs>`:'';
-    return `<svg xmlns="http://www.w3.org/2000/svg" ${interactive?`class="page-canvas" data-page="${p.id}"`:''} width="${interactive?p.width*zoom:p.width}" height="${interactive?p.height*zoom:p.height}" viewBox="0 0 ${p.width} ${p.height}">${css}<defs><clipPath id="page-clip-${prefix}${p.id}"><rect width="${p.width}" height="${p.height}"/></clipPath></defs>${background?`<rect width="${p.width}" height="${p.height}" fill="${esc(p.background)}"/>`:''}<g clip-path="url(#page-clip-${prefix}${p.id})">${p.objects.map(o=>objectSVG(o,interactive,prefix)).join('')}</g>${grid}${interactive&&p.id===page().id?selectionSVG(object())+guidesSVG():''}</svg>`;
+    return `<svg xmlns="http://www.w3.org/2000/svg" ${interactive?`class="page-canvas" data-page="${p.id}"`:''} width="${interactive?p.width*zoom:p.width}" height="${interactive?p.height*zoom:p.height}" viewBox="0 0 ${p.width} ${p.height}">${css}<defs><clipPath id="page-clip-${prefix}${p.id}"><rect width="${p.width}" height="${p.height}"/></clipPath></defs>${background?`<rect width="${p.width}" height="${p.height}" fill="${esc(p.background)}"/>`:''}<g clip-path="url(#page-clip-${prefix}${p.id})">${p.objects.map(o=>objectSVG(o,interactive,prefix)).join('')}</g>${grid}${interactive&&p.id===page().id?selectionSVG(object())+guidesSVG()+rotationGuideSVG():''}</svg>`;
   }
   function guidesSVG(){
     if(preview||!guides.length)return '';
     return `<g class="snap-guides" pointer-events="none">${guides.map(g=>{const x=g.axis==='x'?g.value:g.from-12/zoom,y=g.axis==='y'?g.value:g.from-12/zoom,x2=g.axis==='x'?g.value:g.to+12/zoom,y2=g.axis==='y'?g.value:g.to+12/zoom;return `<line data-guide-axis="${g.axis}" data-guide-source="${g.source}" x1="${x}" y1="${y}" x2="${x2}" y2="${y2}"/><circle cx="${x}" cy="${y}" r="${2.5/zoom}"/><circle cx="${x2}" cy="${y2}" r="${2.5/zoom}"/>`;}).join('')}</g>`;
+  }
+  function rotationGuideSVG(){
+    const o=object();if(preview||!rotationGuide||!o)return '';
+    const a=o.rotation*Math.PI/180,cx=o.x+o.w/2,cy=o.y+o.h/2,r=38/zoom,length=Math.max(o.w,o.h)*.7+24/zoom;
+    const matched=rotationGuide.match,angle=Math.round(Alignment.displayAngle(o.rotation)*10)/10;
+    const label=`${angle===360?0:angle}°${matched?matched.source==='object'?matched.perpendicular?' · 직각 맞춤':' · 평행 맞춤':' · 각도 맞춤':''}`;
+    const hx=cx+Math.sin(a)*(o.h/2+25/zoom),hy=cy-Math.cos(a)*(o.h/2+25/zoom),width=(matched?132:70)/zoom;
+    const line=(x,y,len,angle)=>`<line x1="${x-Math.cos(angle)*len}" y1="${y-Math.sin(angle)*len}" x2="${x+Math.cos(angle)*len}" y2="${y+Math.sin(angle)*len}"/>`;
+    const other=matched?.objectId?page().objects.find(p=>p.id===matched.objectId):null;
+    return `<g class="rotation-guide ${matched?'snapped':''}" data-angle-snapped="${Boolean(matched)}" data-angle-source="${matched?.source||'free'}" pointer-events="none"><circle class="angle-ring" cx="${cx}" cy="${cy}" r="${r}"/>${line(cx,cy,length,a)}${line(cx,cy,r+8/zoom,a+Math.PI/2)}${other?line(other.x+other.w/2,other.y+other.h/2,Math.max(other.w,other.h)*.6,(other.rotation||0)*Math.PI/180):''}<circle class="angle-center" cx="${cx}" cy="${cy}" r="${3/zoom}"/><g transform="translate(${hx+13/zoom} ${hy-12/zoom})"><rect width="${width}" height="${25/zoom}" rx="${5/zoom}"/><text x="${width/2}" y="${16/zoom}" text-anchor="middle" font-size="${11/zoom}">${label}</text></g></g>`;
   }
   function renderStage() {
     setRenderedHTML($('#stage'),(view==='page'?[page()]:project.pages).map(p=>`<div class="page-wrap ${p.id===page().id?'active':''}" data-caption="PAGE ${String(project.pages.indexOf(p)+1).padStart(2,'0')}  /  ${p.width} × ${p.height} PX">${pageSVG(p)}</div>`).join(''));
@@ -284,7 +299,7 @@
     if(o.type==='bubble') html+=section('말풍선 모양',select('shape',o.shape,labels,'말풍선 모양')+`<div style="height:12px"></div>`+color('채우기','fill',o.fill)+color('외곽선','stroke',o.stroke)+range('선 굵기','strokeWidth',o.strokeWidth,0,30)+`<label class="check-row"><input type="checkbox" data-prop="transparent" ${o.transparent?'checked':''}>배경 투명하게</label>`)+(o.shape==='caption'?'':section('꼬리 조절',`<label class="check-row"><input type="checkbox" data-prop="tail" ${o.tail!==false?'checked':''}>꼬리 표시</label><button data-action="tail-mode" class="secondary full">${mode==='tail'?'꼬리 편집 마치기':'캔버스에서 꼬리 편집'}</button><div style="height:12px"></div>${range('붙는 각도','tailAngle',o.tailAngle,0,360,1,'°')}${range('꼬리 폭','tailWidth',o.tailWidth,5,180)}<p class="small">끝점은 자유롭게 이동할 수 있어요.<br>휘어짐 점을 움직여 곡선 꼬리를 만드세요.</p>`));
     if(['bubble','text','sfx'].includes(o.type)) {
       const available=Object.fromEntries([...new Set(fonts.map(f=>f.name))].map(n=>[n,fontNames[n]||n]));
-      html+=section('텍스트',`<textarea data-prop="text" aria-label="텍스트 내용" rows="3" maxlength="20000">${esc(o.text)}</textarea><div style="height:10px"></div>${select('font',o.font,available,'글꼴')}<div class="prop-row" style="margin-top:10px">${field('크기 (px)','fontSize',o.fontSize,4,1500)}<div class="prop-field"><label>굵기</label>${select('weight',o.weight||400,{100:'100 · 가늘게',300:'300 · 얇게',400:'400 · 보통',500:'500 · 중간',700:'700 · 굵게',800:'800 · 아주 굵게',900:'900 · 두껍게'},'글꼴 굵기')}</div></div>${color('글자색','color',o.color)}<div class="prop-row">${select('align',o.align,{left:'왼쪽 정렬',center:'가운데 정렬',right:'오른쪽 정렬'},'텍스트 정렬')}<label class="check-row"><input type="checkbox" data-prop="italic" ${o.italic?'checked':''}>기울임</label></div>${range('행간','lineHeight',o.lineHeight||1.4,.7,3,.05)}${range('자간','letterSpacing',o.letterSpacing||0,-10,50,.5)}${range('안쪽 여백','padding',o.padding||0,0,150)}${color('글자 외곽선','textStroke',o.textStroke||'#ffffff')}${range('외곽선 굵기','textStrokeWidth',o.textStrokeWidth||0,0,30)}${o.type==='sfx'?range('기울이기','skew',o.skew||0,-40,40,1,'°'):''}<button class="quiet full" data-action="import-font">＋ 내 글꼴 추가 (TTF / OTF)</button><p class="small">굵기 파일이 없는 글꼴은 합성 굵기가 적용됩니다.</p>`);
+      html+=section('텍스트',`${textAreas(o).length>1?'<label class="dialogue-label">첫 번째 대사</label>':''}<textarea data-prop="text" aria-label="텍스트 내용" rows="3" maxlength="20000">${esc(o.text)}</textarea>${textAreas(o).length>1?`<label class="dialogue-label">두 번째 대사</label><textarea data-prop="text2" aria-label="두 번째 대사" rows="3" maxlength="20000">${esc(o.text2||'')}</textarea>`:''}${textAlignButtons(o)}<div style="height:10px"></div>${select('font',o.font,available,'글꼴')}<div class="prop-row" style="margin-top:10px">${field('크기 (px)','fontSize',o.fontSize,4,1500)}<div class="prop-field"><label>굵기</label>${select('weight',o.weight||400,{100:'100 · 가늘게',300:'300 · 얇게',400:'400 · 보통',500:'500 · 중간',700:'700 · 굵게',800:'800 · 아주 굵게',900:'900 · 두껍게'},'글꼴 굵기')}</div></div>${color('글자색','color',o.color)}<div class="prop-row"><label class="check-row"><input type="checkbox" data-prop="italic" ${o.italic?'checked':''}>기울임</label></div>${range('행간','lineHeight',o.lineHeight||1.4,.7,3,.05)}${range('자간','letterSpacing',o.letterSpacing||0,-10,50,.5)}${range('안쪽 여백','padding',o.padding||0,0,150)}${color('글자 외곽선','textStroke',o.textStroke||'#ffffff')}${range('외곽선 굵기','textStrokeWidth',o.textStrokeWidth||0,0,30)}${o.type==='sfx'?range('기울이기','skew',o.skew||0,-40,40,1,'°'):''}<button class="quiet full" data-action="import-font">＋ 내 글꼴 추가 (TTF / OTF)</button><p class="small">굵기 파일이 없는 글꼴은 합성 굵기가 적용됩니다.</p>`);
     }
     if(o.type==='image'||o.type==='shape') {
       html+=section('자르기와 모양',select('crop',o.crop||'rectangle',cropLabels,'자르기 모양')+`<button class="secondary full" style="margin-top:10px" data-action="crop-mode">${mode==='crop'?'모양 편집 마치기':'꼭짓점 직접 편집'}</button><div class="prop-row" style="margin-top:8px"><button class="quiet full" data-action="add-point">＋ 편집점</button><button class="quiet full" data-action="remove-point">− 마지막 점</button></div>`);
@@ -298,13 +313,26 @@
     const names={bubbles:['말풍선','이야기에 목소리를 더해 보세요.'],sfx:['효과음','장면에 생동감을 더하는 한 글자.'],text:['텍스트','당신의 이야기를, 당신의 글씨로.'],images:['이미지','장면을 불러오고 자유롭게 다듬으세요.'],panels:['컷 · 효과','장면의 리듬과 속도를 만들어 보세요.']};
     $('#library-title').textContent=names[tab][0];$('#library-description').textContent=names[tab][1];$$('[data-tab]').forEach(b=>b.classList.toggle('active',b.dataset.tab===tab));
     let html='';
-    if(tab==='bubbles') html=`<div class="preset-grid">${Object.entries(labels).map(([shape,label])=>{const b=bubble(shape,{w:110,h:65,tailWidth:13,tailX:shape==='thought'?.85:.75,tailY:shape==='thought'?1.4:1.25,strokeWidth:2,text:''});return `<button class="preset" data-add-bubble="${shape}"><svg viewBox="-8 -4 130 98"><path d="${bubblePath(b)}" fill="#fff" stroke="#53664e" stroke-width="2" ${shape==='whisper'?'stroke-dasharray="4 3"':''}/>${shape==='thought'?thoughtTail(b).map(p=>`<ellipse cx="${p.x}" cy="${p.y}" rx="${p.rx}" ry="${p.ry}" fill="white" stroke="#53664e" stroke-width="2"/>`).join(''):''}${shape==='burst'?'<text x="55" y="41" text-anchor="middle" font-size="20" fill="#53664e">!</text>':''}</svg><span>${label}</span></button>`;}).join('')}</div><div class="tip-card"><strong>↳ 꼬리도, 내 마음대로</strong>말풍선을 추가하고 ‘꼬리 편집’을 누르세요. 세 개의 점으로 위치와 곡선을 자유롭게 조절할 수 있어요.</div>`;
+    if(tab==='bubbles')html=bubbleLibraryHTML();
     if(tab==='sfx') html=`<div class="preset-grid">${sfxPresets.map(([text,font,col,skew],i)=>`<button class="sfx-preset" data-add-sfx="${i}" style="font-family:'${font}';color:${col};font-size:${text.length>3?24:30}px">${text}</button>`).join('')}</div><div class="tip-card"><strong>나만의 효과음</strong>추가 후 글자, 글꼴, 색, 외곽선과 기울기를 모두 바꿀 수 있어요.</div>`;
     if(tab==='text')html=`<button class="text-preset" data-add-text="title" style="font-size:25px;font-weight:800">제목을 더하세요</button><button class="text-preset" data-add-text="body" style="font-size:14px">이야기를 써 내려가세요.</button><button class="text-preset" data-add-text="hand" style="font-family:'Nanum Pen Script';font-size:27px">마음을 담은 한 줄</button><div class="subheading">오프라인 한글 글꼴 ${new Set(fonts.map(f=>f.name)).size}종</div>${Object.entries(fontNames).map(([n,l])=>`<button class="text-preset" data-font-text="${n}" style="font-family:'${n}';font-size:18px">${l}</button>`).join('')}<button class="secondary full" style="margin-top:16px" data-action="import-font">＋ 내 글꼴 추가</button>`;
     if(tab==='images')html=`<button class="primary full" data-action="import-image">＋ 이미지 불러오기</button><p class="small" style="margin-top:10px">PNG · JPG · WEBP · GIF · BMP<br>여러 파일을 끌어 놓을 수도 있어요.</p><div class="tip-card"><strong>컷 안에 이미지 넣기</strong>컷 위에 이미지 파일을 끌어 놓거나, 컷을 선택하고 ‘컷에 이미지 넣기’를 누르세요.</div><div class="tip-card"><strong>이미지와 컷을 따로 조절</strong>컷을 더블클릭하면 안쪽 이미지의 위치와 크기를 바꿀 수 있어요. ‘컷 편집으로’로 돌아오면 컷 자체를 움직입니다.</div><button class="secondary full" data-tab="panels">컷 모양 고르기 ↗</button>`;
     if(tab==='panels')html=`<div class="preset-grid">${Object.entries(cropLabels).filter(([s])=>s!=='custom').map(([s,l])=>`<button class="preset" data-add-panel="${s}"><svg viewBox="0 0 110 75">${s==='ellipse'?'<ellipse cx="55" cy="37" rx="47" ry="29" fill="#f1f5ed" stroke="#53664e" stroke-width="3"/>':`<path d="${polygonPath(crops[s]||crops.rectangle,90,55)}" transform="translate(10 10)" fill="#f1f5ed" stroke="#53664e" stroke-width="3"/>`}</svg><span>${l}</span></button>`).join('')}</div><div class="tip-card"><strong>이미지가 들어가는 컷</strong>컷을 추가한 뒤 이미지 파일을 끌어 놓으세요. 더블클릭으로 안쪽 이미지만 이동·확대할 수 있어요.</div><div class="subheading">장면 효과</div><div class="preset-grid"><button class="preset" data-add-effect="focus"><span style="font-size:38px">✴</span><span>집중선</span></button><button class="preset" data-add-effect="speed"><span style="font-size:38px">≋</span><span>속도선</span></button></div><button class="secondary full" style="margin-top:12px" data-tool="pen">✎ 자유롭게 그리기</button>`;
-    if(tab==='bubbles'||tab==='sfx')html=materialControlsHTML(tab)+materialItemsHTML(tab)+`<div class="subheading">기본 ${tab==='bubbles'?'말풍선':'효과음'}</div>`+html+`<div class="material-backup"><button data-action="export-materials">내 소재 내보내기</button><button data-action="import-materials">소재 파일 불러오기</button></div>`;
+    if(tab==='bubbles'||tab==='sfx')html=materialControlsHTML(tab)+materialItemsHTML(tab)+`<div class="subheading">${tab==='bubbles'?'말풍선 모음':'효과음'}</div>`+html+`<div class="material-backup"><button data-action="export-materials">내 소재 내보내기</button><button data-action="import-materials">소재 파일 불러오기</button></div>`;
     $('#library-content').innerHTML=html;$('#library-content').scrollTop=0;
+  }
+  function textAlignButtons(o){
+    return `<div class="text-align-label">글자 정렬</div><div class="text-align-buttons" role="group" aria-label="텍스트 정렬">${[['left','왼쪽'],['center','중앙'],['right','오른쪽']].map(([align,label])=>`<button type="button" data-text-align="${align}" class="${(o.align||'center')===align?'active':''}" aria-label="${label} 정렬" aria-pressed="${(o.align||'center')===align}"><svg viewBox="0 0 20 16" aria-hidden="true"><path d="M1 2H19M${align==='left'?1:align==='center'?5:9} 6h10M1 10H19M${align==='left'?1:align==='center'?5:9} 14h10"/></svg><span>${label}</span></button>`).join('')}</div>`;
+  }
+  function bubbleThumbnail(o){
+    const t=o.tail!==false&&o.shape!=='caption'?tailGeometry(o):null,points=t?[t.tip,t.control]:[],pad=Math.max(10,(o.strokeWidth||0)*2);
+    const x=Math.min(0,...points.map(p=>p.x))-pad,y=Math.min(0,...points.map(p=>p.y))-pad,w=Math.max(o.w,...points.map(p=>p.x))-x+pad,h=Math.max(o.h,...points.map(p=>p.y))-y+pad;
+    return `<svg viewBox="${x} ${y} ${w} ${h}" aria-hidden="true"><path d="${bubblePath(o)}" fill="white" stroke="#53664e" stroke-width="${Math.max(o.w,o.h)/85*1.5}" stroke-linejoin="${BubbleCatalog.get(o.shape)?.join||'round'}" ${o.shape==='whisper'?`stroke-dasharray="${o.w/25} ${o.w/30}"`:''}/>${dottedTail(o)?thoughtTail(o).map(p=>`<ellipse cx="${p.x}" cy="${p.y}" rx="${p.rx}" ry="${p.ry}" fill="white" stroke="#53664e" stroke-width="${Math.max(o.w,o.h)/85*1.5}"/>`).join(''):''}</svg>`;
+  }
+  function bubbleLibraryHTML(){
+    const choices=[['basic','기본 · 8'],['1','모음 1 · 11'],['2','모음 2 · 33']];
+    const items=bubbleCollection==='basic'?Object.entries(basicLabels).map(([id,name])=>({id,name})):BubbleCatalog.presets.filter(p=>String(p.collection)===bubbleCollection);
+    return `<div class="bubble-collections" role="group" aria-label="말풍선 모음">${choices.map(([id,label])=>`<button data-bubble-collection="${id}" class="${bubbleCollection===id?'active':''}" aria-pressed="${bubbleCollection===id}">${label}</button>`).join('')}</div>${bubbleCollection!=='basic'?`<p class="catalog-note">참고 이미지 ${bubbleCollection}의 말풍선 · 이미지와 같은 번호로 찾으세요.</p>`:''}<div class="preset-grid reference-presets">${items.map(item=>`<button class="preset" data-add-bubble="${item.id}" title="${esc(item.name)}">${item.number?`<span class="preset-number">${String(item.number).padStart(2,'0')}</span>`:''}${bubbleThumbnail(bubble(item.id,{text:'',text2:''}))}<span>${esc(item.name)}</span></button>`).join('')}</div><div class="tip-card"><strong>↳ 꼬리도, 내 마음대로</strong>끝점·붙는 위치·휘어짐을 직접 조절하세요. 이어진 말풍선은 대사를 각각 입력할 수 있어요.</div>`;
   }
   function updateProperty(input,final=false) {
     const key=input.dataset.prop;let value=input.type==='checkbox'?input.checked:input.type==='number'||input.type==='range'?clamp(input.value,+(input.min||-100000),+(input.max||100000)):input.value;
@@ -317,7 +345,7 @@
       if(key==='weight')value=Number(value);
       if(key==='contentX')o.imageX=value/o.w;else if(key==='contentY')o.imageY=value/o.h;else o[key]=value;
       if(key==='crop') {o.points=clone(crops[value]||o.points||crops.rectangle);if(o.type==='shape')o.shape=value;}
-      if(key==='shape'&&value==='caption'){o.tail=false;mode='normal';}
+      if(key==='shape'){const p=BubbleCatalog.get(value);if(p){Object.assign(o,{tail:p.defaults.tail,tailStyle:p.defaults.tailStyle,tailAngle:p.defaults.tailAngle,tailX:p.defaults.tailX,tailY:p.defaults.tailY,tailWidth:p.defaults.tailWidth,bendX:0,bendY:0});if(p.regions&&o.text2===undefined)o.text2='두 번째 대사';}else delete o.tailStyle;if(value==='caption')o.tail=false;mode=o.tail!==false?'tail':'normal';}
     }
     const out=input.parentElement.querySelector('output');if(input.type==='range'&&out)out.textContent=input.value+(input.dataset.prop==='opacity'||input.dataset.prop==='fade'||input.dataset.prop==='fadeStart'?'%':'');
     const hex=input.parentElement.querySelector('span');if(input.type==='color'&&hex)hex.textContent=value;
@@ -414,25 +442,28 @@
     } else ctx.drawImage(im,ix,iy,iw,ih);
     ctx.restore();if(o.strokeWidth){ctx.lineJoin='round';ctx.strokeStyle=o.stroke;ctx.lineWidth=o.strokeWidth;ctx.stroke(path);}
   }
-  async function rasterize(p,scale=1,transparent=false) {
-    await document.fonts.ready;
-    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(p.width*scale));canvas.height=Math.max(1,Math.round(p.height*scale));
-    const ctx=canvas.getContext('2d');ctx.scale(scale,scale);if(!transparent){ctx.fillStyle=p.background;ctx.fillRect(0,0,p.width,p.height);}
-    const paint=(path,o)=>{ctx.lineJoin=o.shape==='caption'?'miter':'round';if(!o.transparent){ctx.fillStyle=o.fill||'#ffffff';ctx.fill(path);}if(o.strokeWidth){ctx.strokeStyle=o.stroke;ctx.lineWidth=o.strokeWidth;ctx.stroke(path);}};
-    for(const o of p.objects) {
-      if(o.visible===false)continue;
-      ctx.save();ctx.globalAlpha=o.opacity??1;ctx.translate(o.x+o.w/2,o.y+o.h/2);ctx.rotate((o.rotation||0)*Math.PI/180);ctx.translate(-o.w/2,-o.h/2);
-      if(o.type==='bubble') {
-        if(o.shape==='whisper')ctx.setLineDash([7,6]);paint(new Path2D(bubblePath(o)),o);ctx.setLineDash([]);
-        if(o.shape==='thought')for(const p of thoughtTail(o)){const path=new Path2D();path.ellipse(p.x,p.y,p.rx,p.ry,0,0,Math.PI*2);paint(path,o);}
-      }
-      if(['bubble','text','sfx'].includes(o.type)) {
+  function paintTextCanvas(ctx,o){
         ctx.save();ctx.transform(1,0,Math.tan((o.skew||0)*Math.PI/180),1,0,0);ctx.font=fontStyle(o);ctx.textBaseline='alphabetic';ctx.letterSpacing=(o.letterSpacing||0)+'px';
         const size=o.fontSize||30,pad=o.padding||0,align=o.align||'center',lh=size*(o.lineHeight||1.4);
         const lines=wrapText(o.text,Math.max(5,o.w-pad*2),size,s=>ctx.measureText(s).width),total=(lines.length-1)*lh+size;
         const x=align==='left'?pad:align==='right'?o.w-pad:o.w/2,y=(o.h-total)/2+size*.82;
         ctx.textAlign=align;ctx.fillStyle=o.color;ctx.lineJoin='round';ctx.strokeStyle=o.textStroke||'#ffffff';ctx.lineWidth=o.textStrokeWidth||0;
         lines.forEach((line,i)=>{if(o.textStrokeWidth)ctx.strokeText(line,x,y+i*lh);ctx.fillText(line,x,y+i*lh);});ctx.restore();
+  }
+  async function rasterize(p,scale=1,transparent=false) {
+    await document.fonts.ready;
+    const canvas=document.createElement('canvas');canvas.width=Math.max(1,Math.round(p.width*scale));canvas.height=Math.max(1,Math.round(p.height*scale));
+    const ctx=canvas.getContext('2d');ctx.scale(scale,scale);if(!transparent){ctx.fillStyle=p.background;ctx.fillRect(0,0,p.width,p.height);}
+    const paint=(path,o)=>{ctx.lineJoin=o.shape==='caption'?'miter':BubbleCatalog.get(o.shape)?.join||'round';ctx.miterLimit=4;if(!o.transparent){ctx.fillStyle=o.fill||'#ffffff';ctx.fill(path);}if(o.strokeWidth){ctx.strokeStyle=o.stroke;ctx.lineWidth=o.strokeWidth;ctx.stroke(path);}};
+    for(const o of p.objects) {
+      if(o.visible===false)continue;
+      ctx.save();ctx.globalAlpha=o.opacity??1;ctx.translate(o.x+o.w/2,o.y+o.h/2);ctx.rotate((o.rotation||0)*Math.PI/180);ctx.translate(-o.w/2,-o.h/2);
+      if(o.type==='bubble') {
+        if(o.shape==='whisper')ctx.setLineDash([7,6]);paint(new Path2D(bubblePath(o)),o);ctx.setLineDash([]);
+        if(dottedTail(o))for(const p of thoughtTail(o)){const path=new Path2D();path.ellipse(p.x,p.y,p.rx,p.ry,0,0,Math.PI*2);paint(path,o);}
+      }
+      if(['bubble','text','sfx'].includes(o.type)) {
+        for(const area of textAreas(o)){ctx.save();ctx.translate(area.x,area.y);paintTextCanvas(ctx,{...o,w:area.w,h:area.h,text:o[area.key]||''});ctx.restore();}
       } else if(hasImage(o)) {
         const a=project.assets[o.assetId],im=await loadImage(a.src);
         if(o.type==='shape'&&(o.opacity??1)<1){
@@ -530,7 +561,7 @@
     if(name==='grid'){showGrid=!showGrid;renderStage();renderContext();return;}if(name==='snap'){snap=!snap;guides=[];renderStage();renderContext();return;}
     if(name==='preview'){preview=!preview;renderStage();renderContext();return;}
     if(name==='import-image'){if(o?.type==='shape'&&!o.locked)return requestFrameImage(o);$('#image-input').click();return;}if(name==='import-font'){$('#font-input').click();return;}
-    if(name==='help')return modal('작업실 사용 가이드',`<p>모든 편집은 이 기기에서 처리됩니다. 먼저 왼쪽 소재를 추가하고, 오른쪽 속성에서 세밀하게 다듬어 보세요.</p>${[['선택 / 펜 / 화면 이동','V / B / H'],['드래그로 화면 이동','Space + 드래그'],['실행 취소 / 다시 실행','Ctrl+Z / Ctrl+Shift+Z'],['프로젝트 저장 / 열기','Ctrl+S / Ctrl+O'],['이미지 내보내기','Ctrl+E'],['복제 / 복사 / 붙여넣기','Ctrl+D / Ctrl+C / Ctrl+V'],['레이어 이동 / 빠른 이동','방향키 / Shift+방향키'],['비율 유지하여 크기 조절','Shift + 모서리 드래그'],['삭제 / 선택 해제','Delete / Esc'],['화면 확대·축소','Ctrl + 마우스 휠']].map(([a,b])=>`<div class="kbd-row"><span>${a}</span><span class="kbd">${b}</span></div>`).join('')}<p style="margin-top:18px"><b>캔버스 크기:</b> 상단 ‘캔버스 크기’에서 가로·세로를 변경합니다. 최대 8000 × 8000 px입니다.<br><b>텍스트만:</b> 상단 ‘텍스트만 추가’를 누르면 말풍선 없는 글자를 넣습니다.<br><b>내 소재:</b> 말풍선·효과음 탭에서 직접 만들거나 선택한 소재를 저장하세요. ‘내 그림 불러오기’로 투명 PNG 등도 추가할 수 있습니다. 그림 소재는 이미지로 편집됩니다. 내 소재는 프로젝트와 별도로 이 기기에 보관됩니다. 다른 PC에서는 ‘내 소재 내보내기’와 ‘소재 파일 불러오기’를 사용하세요.<br><b>말풍선 꼬리:</b> 말풍선 선택 → 꼬리 편집 → 끝점·붙는 위치·휘어짐 점 드래그.<br><b>컷에 이미지:</b> 컷 위에 이미지 파일을 놓거나 컷 선택 후 ‘컷에 이미지 넣기’를 누르세요. 더블클릭으로 안쪽 이미지만 이동·확대하고 Esc로 컷 편집에 돌아갑니다. 테두리 두께는 오른쪽 ‘컷 테두리’에서 바꿉니다.<br><b>스냅 안내선:</b> 캔버스 중앙·가장자리와 다른 소재의 중심·가장자리에 자동 맞춤합니다. 상단 버튼으로 켜고 끄며 Alt를 누르면 잠시 해제됩니다.<br><b>이미지:</b> 모양 편집으로 꼭짓점을 움직이고, 테두리를 더블클릭해 점을 추가하세요.<br><b>저장:</b> 자동 저장은 이 기기의 최근 작업 한 개를 보관합니다. 파일 보관·다른 PC 이동에는 ‘프로젝트 저장’을 사용하세요.<br><b>글꼴:</b> 11종의 기본 한글 글꼴과 TTF/OTF/WOFF 추가를 지원합니다. 글꼴 재배포는 해당 라이선스를 따라 주세요.<br><b>GIF:</b> 정지 이미지로 편집·내보내기됩니다.</p>`,`<button class="primary" data-action="close-modal">작업 시작</button>`);
+    if(name==='help')return modal('작업실 사용 가이드',`<p>모든 편집은 이 기기에서 처리됩니다. 먼저 왼쪽 소재를 추가하고, 오른쪽 속성에서 세밀하게 다듬어 보세요.</p>${[['선택 / 펜 / 화면 이동','V / B / H'],['드래그로 화면 이동','Space + 드래그'],['실행 취소 / 다시 실행','Ctrl+Z / Ctrl+Shift+Z'],['프로젝트 저장 / 열기','Ctrl+S / Ctrl+O'],['이미지 내보내기','Ctrl+E'],['복제 / 복사 / 붙여넣기','Ctrl+D / Ctrl+C / Ctrl+V'],['레이어 이동 / 빠른 이동','방향키 / Shift+방향키'],['비율 유지하여 크기 조절','Shift + 모서리 드래그'],['삭제 / 선택 해제','Delete / Esc'],['화면 확대·축소','Ctrl + 마우스 휠']].map(([a,b])=>`<div class="kbd-row"><span>${a}</span><span class="kbd">${b}</span></div>`).join('')}<p style="margin-top:18px"><b>캔버스 크기:</b> 상단 ‘캔버스 크기’에서 가로·세로를 변경합니다. 최대 8000 × 8000 px입니다.<br><b>텍스트만:</b> 상단 ‘텍스트만 추가’를 누르면 말풍선 없는 글자를 넣습니다. 오른쪽 ‘왼쪽 / 중앙 / 오른쪽’ 버튼으로 정렬합니다.<br><b>말풍선 모음:</b> 기본 8종과 참고 이미지의 모음 1(11종)·모음 2(33종)를 제공합니다. 이어진 말풍선은 첫 번째·두 번째 대사를 따로 입력합니다.<br><b>내 소재:</b> 말풍선·효과음 탭에서 직접 만들거나 선택한 소재를 저장하세요. ‘내 그림 불러오기’로 투명 PNG 등도 추가할 수 있습니다. 그림 소재는 이미지로 편집됩니다. 내 소재는 프로젝트와 별도로 이 기기에 보관됩니다. 다른 PC에서는 ‘내 소재 내보내기’와 ‘소재 파일 불러오기’를 사용하세요.<br><b>말풍선 꼬리:</b> 말풍선 선택 → 꼬리 편집 → 끝점·붙는 위치·휘어짐 점 드래그.<br><b>컷에 이미지:</b> 컷 위에 이미지 파일을 놓거나 컷 선택 후 ‘컷에 이미지 넣기’를 누르세요. 더블클릭으로 안쪽 이미지만 이동·확대하고 Esc로 컷 편집에 돌아갑니다. 테두리 두께는 오른쪽 ‘컷 테두리’에서 바꿉니다.<br><b>스냅 안내선:</b> 캔버스 중앙·가장자리와 다른 소재의 중심·가장자리에 자동 맞춤합니다. 상단 버튼으로 켜고 끄며 Alt를 누르면 잠시 해제됩니다. 회전 핸들은 15° 간격의 각도와 다른 소재에 평행·직각인 각도로 맞춰집니다. Shift+회전은 15° 단위로 고정합니다.<br><b>이미지:</b> 모양 편집으로 꼭짓점을 움직이고, 테두리를 더블클릭해 점을 추가하세요.<br><b>저장:</b> 자동 저장은 이 기기의 최근 작업 한 개를 보관합니다. 파일 보관·다른 PC 이동에는 ‘프로젝트 저장’을 사용하세요.<br><b>글꼴:</b> 11종의 기본 한글 글꼴과 TTF/OTF/WOFF 추가를 지원합니다. 글꼴 재배포는 해당 라이선스를 따라 주세요.<br><b>GIF:</b> 정지 이미지로 편집·내보내기됩니다.</p>`,`<button class="primary" data-action="close-modal">작업 시작</button>`);
     if(name==='duplicate')return duplicateObject();
     if(['bring-front','send-back','forward','backward'].includes(name))return reorder(name);
     if(!o||o.locked)return;
@@ -546,6 +577,8 @@
   }
   document.addEventListener('click',async e=>{
     const b=e.target.closest('button');if(b?.disabled)return;
+    if(b?.dataset.bubbleCollection){if(['basic','1','2'].includes(b.dataset.bubbleCollection)){bubbleCollection=b.dataset.bubbleCollection;renderLibrary();}return;}
+    if(b?.dataset.textAlign){const o=object();if(o&&!o.locked&&['bubble','text','sfx'].includes(o.type)&&['left','center','right'].includes(b.dataset.textAlign)){o.align=b.dataset.textAlign;commit();renderStage();renderProperties();}return;}
     if(b?.dataset.action){await action(b.dataset.action);return;}
     if(b?.dataset.tab){tab=b.dataset.tab;renderLibrary();return;}
     if(b?.dataset.tool){tool=b.dataset.tool;mode='normal';preview=false;renderContext();renderProperties();return;}
@@ -577,7 +610,7 @@
   const viewport=$('#stage-viewport');
   viewport.addEventListener('pointerdown',e=>{
     if(e.button!==0&&e.button!==1)return;
-    guides=[];
+    guides=[];rotationGuide=null;
     if(tool==='hand'||space||e.button===1){drag={kind:'pan',sx:e.clientX,sy:e.clientY,scrollX:viewport.scrollLeft,scrollY:viewport.scrollTop};e.preventDefault();return;}
     const svg=e.target.closest('.page-canvas');if(!svg||preview)return;
     const pid=svg.dataset.page;if(page().id!==pid){project.activePage=pid;selected=null;mode='normal';}
@@ -588,7 +621,7 @@
     const handle=e.target.closest('[data-handle]')?.dataset.handle,target=e.target.closest('[data-object]')?.dataset.object;
     if(!handle) {if(selected!==target)mode='normal';selected=target||null;}
     const o=object();
-    if(o&&!o.locked) {drag={kind:handle||((mode==='image-pan'&&hasImage(o))?'image-pan':'move'),id:o.id,page:pid,start:{x:pos.x,y:pos.y},before:clone(o),moved:false};e.preventDefault();}
+    if(o&&!o.locked) {drag={kind:handle||((mode==='image-pan'&&hasImage(o))?'image-pan':'move'),id:o.id,page:pid,start:{x:pos.x,y:pos.y},before:clone(o),moved:false};if(handle==='rotate'){drag.lastAngle=Math.atan2(pos.y-o.y-o.h/2,pos.x-o.x-o.w/2)*180/Math.PI;drag.rawRotation=o.rotation||0;rotationGuide={match:null};}e.preventDefault();}
     renderStage();renderPages();renderProperties();renderLayers();renderContext();
   });
   document.addEventListener('pointermove',e=>{
@@ -606,7 +639,10 @@
     else if(drag.kind==='tail-base'){o.tailAngle=(Math.atan2((q.y-o.h/2)/(o.h/2),(q.x-o.w/2)/(o.w/2))*180/Math.PI+360)%360;}
     else if(drag.kind==='tail-curve'){const t=tailGeometry(o);o.bendX=(q.x-(t.base.x+t.tip.x)/2)/o.w;o.bendY=(q.y-(t.base.y+t.tip.y)/2)/o.h;}
     else if(drag.kind.startsWith('point-')){o.points[+drag.kind.split('-')[1]]=[clamp(q.x/o.w,0,1),clamp(q.y/o.h,0,1)];o.crop='custom';}
-    else if(drag.kind==='rotate'){const angle=Math.atan2(p.y-b.y-b.h/2,p.x-b.x-b.w/2)-Math.atan2(drag.start.y-b.y-b.h/2,drag.start.x-b.x-b.w/2);o.rotation=b.rotation+angle*180/Math.PI;if(e.shiftKey)o.rotation=Math.round(o.rotation/15)*15;}
+    else if(drag.kind==='rotate'){
+      const angle=Math.atan2(p.y-b.y-b.h/2,p.x-b.x-b.w/2)*180/Math.PI;drag.rawRotation+=Alignment.angleDelta(drag.lastAngle,angle);drag.lastAngle=angle;
+      const result=Alignment.snapRotation(drag.rawRotation,o,page().objects,{enabled:snap&&!e.altKey,forceStep:e.shiftKey});o.rotation=result.rotation;rotationGuide={match:result.guide};
+    }
     else {
       const west=drag.kind.includes('w'),north=drag.kind.includes('n');let w=clamp(west?b.w-q.x:q.x,10,16000),h=clamp(north?b.h-q.y:q.y,10,16000);
       if(e.shiftKey){const factor=Math.max(w/b.w,h/b.h);w=clamp(b.w*factor,10,16000);h=clamp(b.h*factor,10,16000);}
@@ -617,11 +653,11 @@
     renderStage();
   });
   function finishDrag(cancel=false){if(!drag)return;
-    guides=[];
+    guides=[];rotationGuide=null;
     if(drag.kind!=='pan') {
       const o=object();if(cancel&&o&&drag.before)Object.assign(o,drag.before);
       else if(o&&drag.kind==='pen'){if(o.points.length===1)o.points.push([o.points[0][0]+.001,o.points[0][1]+.001]);const pts=o.points.map(p=>[p[0]*o.w,p[1]*o.h]),xs=pts.map(p=>p[0]),ys=pts.map(p=>p[1]),pad=o.strokeWidth/2;const x=Math.min(...xs)-pad,y=Math.min(...ys)-pad,w=Math.max(2,Math.max(...xs)-x+pad),h=Math.max(2,Math.max(...ys)-y+pad);Object.assign(o,{x,y,w,h,points:pts.map(p=>[(p[0]-x)/w,(p[1]-y)/h])});}
-      if(!cancel)commit();renderProperties();renderLayers();renderStage();
+      if(!cancel){if(o&&drag.kind==='rotate'&&drag.moved)o.rotation=num(Alignment.angleDelta(0,o.rotation));commit();}renderProperties();renderLayers();renderStage();
     }drag=null;
   }
   document.addEventListener('pointerup',()=>finishDrag());document.addEventListener('pointercancel',()=>finishDrag(true));

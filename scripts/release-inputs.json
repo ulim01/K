@@ -14,15 +14,16 @@
   "assets/icon.ico": "b6ea6907d5fb58a48469531af4e968608fd9410881cae7ae9bb8a88a3b02ce75",
   "assets/icon.svg": "f4115fc74fc72eb512a28c3151a0b2a2a65d3e22e513c3762ed12137cebd399f",
   "electron.cjs": "4f25735c4a56b0bb77891c3720f0c320a92dae9d9032a14195d81c595656271e",
-  "index.html": "1167b6571f090ab5d09906014487f24fde69cdaa2ed2aa95af1398d998c862e6",
+  "index.html": "fd6fe744c5f6995a68a0fea2b2e8c14a379bae68e309b7140ccae40d9d65a732",
   "preload.cjs": "1d576915ea71546cdab134d2e161be63445eeb2282cf4cfaa451bd5aa0735655",
-  "src/alignment.js": "854c0816911a143db0b66e5a2bf0699a91f4a385afd6b2ecbfadeab9783ec468",
-  "src/app.js": "c4c9c8eeb7c9da2e00b6be5d5a152de855ff97d2b36124f6253d5742e9af0c32",
-  "src/geometry.js": "a401cd7b0642d866bfc36655cc610ab7612e47f074abe1a8234b2e559b78a42c",
+  "src/alignment.js": "fb746bd74dd931b8c72dfd696008e603a76f833b4897cfe0a60c9175d950f79d",
+  "src/app.js": "fceeae76bd252b20aef6c921321db1082f684ee76240dd27c1682f2e4040bfe3",
+  "src/bubble-presets.js": "79d206e7fd6ff0d8ca49adbe411fa2ff13df3776d08d08b00016bbb82fea2d6d",
+  "src/geometry.js": "742a1d0950ecfafca686779f34e39e526cdf6607eef66e8bece6bbad106c9ac4",
   "src/material-library.js": "b72e610dc340d1f2b0607ddf314054dcfa81cd11787178bb2eacc1e46d51873b",
-  "src/materials.css": "49eacca2e3111adb7aeae4825583ba74ecea16c013818cfdf07199a20219e30a",
+  "src/materials.css": "7915d7fe973a62d58fd9f31830b2a97152621c98a0298ff67f2a7ecdf76fea00",
   "src/style.css": "ed586b3655b3e331f8dbb7af8fe8b28c9410ab9bd81477ff1d4ec2d7fc29601a",
   "vendor/JSZip-LICENSE.txt": "566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4",
   "vendor/jszip.min.js": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e",
-  "사용설명서.txt": "ec00443183aea9d57ddf87fd0e0b3b7590260f8352caf8d0bda7c841ed057d5d"
+  "사용설명서.txt": "999e6c482a6c441833ff8362c08d6947bf51f54d3647cfeb5b65ab3f908539d6"
 }

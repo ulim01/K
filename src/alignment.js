@@ -52,6 +52,23 @@
     if(my&&Math.abs((north?result.y:result.y+h)-my.target.value)<.01)guides.push(guide('y',my,b));
     return {...result,guides};
   }
-  const api={bounds,snapMove,snapResize};
+  const angleDelta=(from,to)=>((to-from+180)%360+360)%360-180;
+  const displayAngle=angle=>((angle%360)+360)%360;
+  function snapRotation(angle,o,objects,{enabled=true,forceStep=false,tolerance=3}={}){
+    if(forceStep){const rotation=Math.round(angle/15)*15;return {rotation,guide:{source:'step',angle:displayAngle(rotation)}};}
+    if(!enabled)return {rotation:angle,guide:null};
+    const candidates=Array.from({length:24},(_,i)=>({angle:i*15,source:'step'}));
+    for(const other of objects){
+      if(other.id===o.id||other.visible===false)continue;
+      for(const offset of [0,90,180,270])candidates.push({angle:displayAngle((other.rotation||0)+offset),source:'object',objectId:other.id,perpendicular:offset%180===90});
+    }
+    let best=null;
+    for(const candidate of candidates){
+      const delta=angleDelta(angle,candidate.angle),distance=Math.abs(delta);
+      if(distance<=tolerance&&(!best||distance<best.distance-1e-7))best={...candidate,delta,distance};
+    }
+    return best?{rotation:best.angle+Math.round((angle-best.angle)/360)*360,guide:best}:{rotation:angle,guide:null};
+  }
+  const api={bounds,snapMove,snapResize,snapRotation,angleDelta,displayAngle};
   if(typeof module!=='undefined')module.exports=api;else root.Alignment=api;
 })(typeof window!=='undefined'?window:globalThis);

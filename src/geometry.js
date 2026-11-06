@@ -1,10 +1,12 @@
 (function (root) {
   'use strict';
+  const catalog=typeof module!=='undefined'?require('./bubble-presets.js'):root.BubbleCatalog;
   const clamp = (n, min, max) => Math.min(max, Math.max(min, Number.isFinite(+n) ? +n : min));
   const esc = value => String(value ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
   const num = n => Math.round(n * 1000) / 1000;
   const point = p => `${num(p.x)},${num(p.y)}`;
   function perimeter(shape, w, h, a) {
+    if(catalog.get(shape)){const p=catalog.intersection(shape,a);if(p)return {...p,x:p.x*w,y:p.y*h};}
     let x, y;
     const c = Math.cos(a), s = Math.sin(a);
     if (shape === 'caption') {
@@ -39,19 +41,36 @@
   }
   function bubblePath(o) {
     if(o.shape==='caption')return `M0,0 L${num(o.w)},0 L${num(o.w)},${num(o.h)} L0,${num(o.h)} Z`;
-    const tail = o.tail !== false && o.shape !== 'caption' && o.shape !== 'thought';
+    const tail = o.tail !== false && o.shape !== 'caption' && !dottedTail(o);
     const t=tailGeometry(o), steps=o.shape==='burst'?288:192;
+    const custom=catalog.outline(o.shape);
+    if(custom){
+      let d='';
+      if(tail&&t.start.edge!==undefined&&t.end.edge!==undefined){
+        d='M'+point(t.start);let count=(t.end.edge-t.start.edge+custom.length)%custom.length;
+        if(!count&&t.end.t<=t.start.t)count=custom.length;
+        for(let i=1;i<=count;i++){const p=custom[(t.start.edge+i)%custom.length];d+=' L'+point({x:p[0]*o.w,y:p[1]*o.h});}
+        d+=' L'+point(t.end)+tailCurves(t);
+      }else d=custom.map((p,i)=>(i?' L':'M')+point({x:p[0]*o.w,y:p[1]*o.h})).join('');
+      return d+' Z';
+    }
     const a0=tail?t.a+t.delta:0, length=tail?Math.PI*2-t.delta*2:Math.PI*2;
     let d='';
     for(let i=0;i<=steps;i++) {
       const p=perimeter(o.shape,o.w,o.h,a0+length*i/steps);
       d+=(i?' L':'M')+point(p);
     }
-    if(tail) {
-      const v={x:(t.end.x-t.start.x)*.24,y:(t.end.y-t.start.y)*.24};
-      d+=` Q${point({x:t.control.x+v.x,y:t.control.y+v.y})} ${point(t.tip)} Q${point({x:t.control.x-v.x,y:t.control.y-v.y})} ${point(t.start)}`;
-    }
+    if(tail)d+=tailCurves(t);
     return d+' Z';
+  }
+  function tailCurves(t){
+    const v={x:(t.end.x-t.start.x)*.24,y:(t.end.y-t.start.y)*.24};
+    return ` Q${point({x:t.control.x+v.x,y:t.control.y+v.y})} ${point(t.tip)} Q${point({x:t.control.x-v.x,y:t.control.y-v.y})} ${point(t.start)}`;
+  }
+  function dottedTail(o){return o.shape==='thought'||o.tailStyle==='dots';}
+  function textAreas(o){
+    const regions=o.type==='bubble'?catalog.get(o.shape)?.regions:null;
+    return (regions||[[0,0,1,1]]).map((r,i)=>({x:r[0]*o.w,y:r[1]*o.h,w:r[2]*o.w,h:r[3]*o.h,key:i?'text2':'text'}));
   }
   function thoughtTail(o) {
     if(o.tail===false)return [];
@@ -113,7 +132,8 @@
         ids.add(o.id);
         for(const k of ['x','y','w','h']) if(!Number.isFinite(o[k])||Math.abs(o[k])>100000) throw Error('레이어 좌표가 올바르지 않습니다.');
         if(o.w<1||o.h<1) throw Error('레이어 크기가 올바르지 않습니다.');
-        if(o.text!==undefined && (typeof o.text!=='string'||o.text.length>20000)) throw Error('텍스트가 올바르지 않습니다.');
+        for(const key of ['text','text2'])if(o[key]!==undefined && (typeof o[key]!=='string'||o[key].length>20000)) throw Error('텍스트가 올바르지 않습니다.');
+        if(o.tailStyle!==undefined&&!['solid','dots'].includes(o.tailStyle))throw Error('말풍선 꼬리 형식이 올바르지 않습니다.');
         for(const k of ['font','name','shape','crop','align','effect'])if(o[k]!==undefined&&(typeof o[k]!=='string'||o[k].length>200))throw Error('레이어 이름 또는 스타일이 올바르지 않습니다.');
         for(const k of ['fill','stroke','color','textStroke']) if(o[k]&&!/^#[\da-f]{6}$/i.test(o[k])) throw Error('레이어 색상이 올바르지 않습니다.');
         const bounds={rotation:[-36000,36000],opacity:[0,1],strokeWidth:[0,200],fontSize:[1,1500],weight:[100,900],lineHeight:[.5,4],letterSpacing:[-50,200],textStrokeWidth:[0,100],padding:[0,2000],tailX:[-100,100],tailY:[-100,100],bendX:[-100,100],bendY:[-100,100],tailAngle:[-36000,36000],tailWidth:[1,2000],imageZoom:[.1,20],imageX:[-100,100],imageY:[-100,100],fade:[0,1],fadeAngle:[-36000,36000],fadeStart:[0,.99],skew:[-60,60],density:[5,150],seed:[0,100000]};
@@ -130,6 +150,6 @@
     for(const f of p.fonts||[])if(!f.name.trim()||f.name.length>200||(f.weight!==undefined&&(!Number.isFinite(f.weight)||f.weight<100||f.weight>900)))throw Error('글꼴 이름 또는 굵기가 올바르지 않습니다.');
     return p;
   }
-  const api={clamp,esc,num,point,perimeter,tailGeometry,thoughtTail,bubblePath,polygonPath,crops,wrapText,localPoint,imagePlacement,resizeImage,containsPoint,validateProject};
+  const api={clamp,esc,num,point,perimeter,tailGeometry,thoughtTail,dottedTail,textAreas,bubblePath,polygonPath,crops,wrapText,localPoint,imagePlacement,resizeImage,containsPoint,validateProject};
   if(typeof module!=='undefined') module.exports=api; else root.G=api;
 })(typeof window!=='undefined'?window:globalThis);
