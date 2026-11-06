@@ -1,5 +1,4 @@
 {
-  "assets/demo/demo.js": "6439a3ade6e8278bface54c1ac8b791110676acb7dc2b6d07a5f52f0952be8b0",
   "assets/fonts/blackhansans-OFL.txt": "c324192c8b3a988bae45a9a7e4ac1258b684739003bda114e0523423440457c9",
   "assets/fonts/dohyeon-OFL.txt": "de5ff32211a4340b01477af39ee339d639438955e409f79b666d4b9207f3c92c",
   "assets/fonts/fonts.js": "f8c5ca0f297aaee56631786db2d0703a2e6d18bfbed64995eaeea3380dab1dcb",
@@ -15,14 +14,15 @@
   "assets/icon.ico": "b6ea6907d5fb58a48469531af4e968608fd9410881cae7ae9bb8a88a3b02ce75",
   "assets/icon.svg": "f4115fc74fc72eb512a28c3151a0b2a2a65d3e22e513c3762ed12137cebd399f",
   "electron.cjs": "4f25735c4a56b0bb77891c3720f0c320a92dae9d9032a14195d81c595656271e",
-  "index.html": "69a5504b29089a186e3b0315bc1f5b321654b82c863b89dbe5c7331dd8ba4de7",
+  "index.html": "1167b6571f090ab5d09906014487f24fde69cdaa2ed2aa95af1398d998c862e6",
   "preload.cjs": "1d576915ea71546cdab134d2e161be63445eeb2282cf4cfaa451bd5aa0735655",
-  "src/app.js": "dee6788b8018c36ebfbfbe4d9ed7a99267a24f321b946cd52e6402f4a7adffc7",
-  "src/geometry.js": "5338b2351bec47a35264a98f94a1154f5fabe9d933951a404a91f891427ab8c7",
+  "src/alignment.js": "854c0816911a143db0b66e5a2bf0699a91f4a385afd6b2ecbfadeab9783ec468",
+  "src/app.js": "c4c9c8eeb7c9da2e00b6be5d5a152de855ff97d2b36124f6253d5742e9af0c32",
+  "src/geometry.js": "a401cd7b0642d866bfc36655cc610ab7612e47f074abe1a8234b2e559b78a42c",
   "src/material-library.js": "b72e610dc340d1f2b0607ddf314054dcfa81cd11787178bb2eacc1e46d51873b",
-  "src/materials.css": "bd9923cf83a3e836cdeda6fd1cd1d6bb382252e328f20a5d4bf6d2a431e4090e",
+  "src/materials.css": "49eacca2e3111adb7aeae4825583ba74ecea16c013818cfdf07199a20219e30a",
   "src/style.css": "ed586b3655b3e331f8dbb7af8fe8b28c9410ab9bd81477ff1d4ec2d7fc29601a",
   "vendor/JSZip-LICENSE.txt": "566c953c6090b1218ca6217dd7359d45dde46581968586dc607d59a78af6a9c4",
   "vendor/jszip.min.js": "acc7e41455a80765b5fd9c7ee1b8078a6d160bbbca455aeae854de65c947d59e",
-  "사용설명서.txt": "1491c259fc45b34bd78824c915bab0e90dca94563e34687df59802d701901fec"
+  "사용설명서.txt": "ec00443183aea9d57ddf87fd0e0b3b7590260f8352caf8d0bda7c841ed057d5d"
 }

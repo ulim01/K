@@ -44,8 +44,8 @@ with sync_playwright() as pw:
         x,y=box['x']+box['width']/2,box['y']+box['height']/2
         page.mouse.move(x,y);page.mouse.down();page.mouse.move(x+dx,y+dy,steps=8);page.mouse.up()
     assert page.evaluate('document.fonts.size')==14
-    assert len(state()['pages'][0]['objects'])==8
-    ok('offline Korean font faces and editable example loaded')
+    assert len(state()['pages'][0]['objects'])==0
+    ok('offline Korean fonts loaded with an empty canvas and no bundled backgrounds')
     page.screenshot(path=str(OUT/'editor.png'))
     page.locator('[data-add-bubble="ellipse"]').click()
     before=selected()
@@ -185,9 +185,9 @@ with sync_playwright() as pw:
     c2=browser.new_context(viewport={'width':1200,'height':800})
     p2=c2.new_page();p2.on('pageerror',lambda e:errors.append(str(e)))
     p2.goto(BASE);p2.wait_for_selector('body[data-ready="true"]',timeout=60000)
-    assert p2.locator('.object').count()==8
+    assert p2.locator('.object').count()==0
     p2.screenshot(path=str(OUT/'editor-1200.png'))
-    c2.set_offline(True);p2.locator('[data-add-bubble="ellipse"]').click();assert p2.locator('.object').count()==9;c2.set_offline(False)
+    c2.set_offline(True);p2.locator('[data-add-bubble="ellipse"]').click();assert p2.locator('.object').count()==1;c2.set_offline(False)
     ok('editing with network disabled and smaller desktop layout')
     p2.goto(BASE+'/assets/icon.svg');p2.set_viewport_size({'width':256,'height':256});p2.locator('svg').screenshot(path=str(OUT/'icon.png'),omit_background=True)
     Image.open(OUT/'icon.png').save(ROOT/'assets/icon.ico',sizes=[(16,16),(24,24),(32,32),(48,48),(64,64),(128,128),(256,256)])

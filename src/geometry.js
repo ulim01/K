@@ -78,6 +78,28 @@
     const a=-(o.rotation||0)*Math.PI/180, dx=p.x-o.x-o.w/2,dy=p.y-o.y-o.h/2;
     return {x:dx*Math.cos(a)-dy*Math.sin(a)+o.w/2,y:dx*Math.sin(a)+dy*Math.cos(a)+o.h/2};
   }
+  function imagePlacement(o,asset){
+    const scale=Math.max(o.w/asset.width,o.h/asset.height)*(o.imageZoom||1),w=asset.width*scale,h=asset.height*scale;
+    return {x:(o.w-w)/2+(o.imageX||0)*o.w,y:(o.h-h)/2+(o.imageY||0)*o.h,w,h};
+  }
+  function containsPoint(o,p){
+    const q=localPoint(o,p),x=q.x/o.w,y=q.y/o.h;
+    if(o.crop==='ellipse')return ((x-.5)*2)**2+((y-.5)*2)**2<=1;
+    const pts=o.points||crops.rectangle;let inside=false;
+    for(let i=0,j=pts.length-1;i<pts.length;j=i++){
+      const [xi,yi]=pts[i],[xj,yj]=pts[j];
+      if(Math.abs((x-xi)*(yj-yi)-(y-yi)*(xj-xi))<1e-8&&x>=Math.min(xi,xj)&&x<=Math.max(xi,xj)&&y>=Math.min(yi,yj)&&y<=Math.max(yi,yj))return true;
+      if((yi>y)!==(yj>y)&&x<(xj-xi)*(y-yi)/(yj-yi)+xi)inside=!inside;
+    }
+    return inside;
+  }
+  function resizeImage(o,asset,handle,p){
+    const b=imagePlacement(o,asset),west=handle.endsWith('nw')||handle.endsWith('sw'),north=handle.endsWith('nw')||handle.endsWith('ne');
+    const ax=b.x+(west?b.w:0),ay=b.y+(north?b.h:0),vx=(west?-1:1)*b.w,vy=(north?-1:1)*b.h;
+    const factor=((p.x-ax)*vx+(p.y-ay)*vy)/(vx*vx+vy*vy),imageZoom=clamp((o.imageZoom||1)*factor,.1,20);
+    const scale=imageZoom/(o.imageZoom||1),w=b.w*scale,h=b.h*scale,x=ax-(west?w:0),y=ay-(north?h:0);
+    return {imageZoom,imageX:clamp((x-(o.w-w)/2)/o.w,-100,100),imageY:clamp((y-(o.h-h)/2)/o.h,-100,100)};
+  }
   function validateProject(p) {
     if(!p || p.format!=='panel-studio' || p.version!==1 || !Array.isArray(p.pages) || !p.pages.length || p.pages.length>200) throw Error('Panel Studio 프로젝트 파일이 아닙니다. (최대 200페이지)');
     const ids=new Set(),types=['bubble','text','sfx','image','shape','pen','effect'];
@@ -94,7 +116,7 @@
         if(o.text!==undefined && (typeof o.text!=='string'||o.text.length>20000)) throw Error('텍스트가 올바르지 않습니다.');
         for(const k of ['font','name','shape','crop','align','effect'])if(o[k]!==undefined&&(typeof o[k]!=='string'||o[k].length>200))throw Error('레이어 이름 또는 스타일이 올바르지 않습니다.');
         for(const k of ['fill','stroke','color','textStroke']) if(o[k]&&!/^#[\da-f]{6}$/i.test(o[k])) throw Error('레이어 색상이 올바르지 않습니다.');
-        const bounds={rotation:[-36000,36000],opacity:[0,1],strokeWidth:[0,200],fontSize:[1,1500],weight:[100,900],lineHeight:[.5,4],letterSpacing:[-50,200],textStrokeWidth:[0,100],padding:[0,2000],tailX:[-100,100],tailY:[-100,100],bendX:[-100,100],bendY:[-100,100],tailAngle:[-36000,36000],tailWidth:[1,2000],imageZoom:[.1,20],imageX:[-10,10],imageY:[-10,10],fade:[0,1],fadeAngle:[-36000,36000],fadeStart:[0,.99],skew:[-60,60],density:[5,150],seed:[0,100000]};
+        const bounds={rotation:[-36000,36000],opacity:[0,1],strokeWidth:[0,200],fontSize:[1,1500],weight:[100,900],lineHeight:[.5,4],letterSpacing:[-50,200],textStrokeWidth:[0,100],padding:[0,2000],tailX:[-100,100],tailY:[-100,100],bendX:[-100,100],bendY:[-100,100],tailAngle:[-36000,36000],tailWidth:[1,2000],imageZoom:[.1,20],imageX:[-100,100],imageY:[-100,100],fade:[0,1],fadeAngle:[-36000,36000],fadeStart:[0,.99],skew:[-60,60],density:[5,150],seed:[0,100000]};
         for(const [key,[lo,hi]] of Object.entries(bounds)) if(o[key]!==undefined&&(!Number.isFinite(o[key])||o[key]<lo||o[key]>hi)) throw Error(`레이어 속성이 올바르지 않습니다: ${key}`);
         if(o.points && (!Array.isArray(o.points)||o.points.length>20000||o.points.some(a=>!Array.isArray(a)||a.length!==2||a.some(n=>!Number.isFinite(n)||Math.abs(n)>100)))) throw Error('편집점 데이터가 올바르지 않습니다.');
       }
@@ -103,11 +125,11 @@
     for(const [id,a] of Object.entries(p.assets)) {
       if(!/^[\w-]{1,80}$/.test(id)||!a||typeof a.src!=='string'||!/^data:image\/(png|jpeg|webp|gif|bmp);base64,[\w+/=]+$/.test(a.src)||!Number.isFinite(a.width)||!Number.isFinite(a.height)||a.width<1||a.height<1) throw Error('이미지 데이터가 올바르지 않습니다.');
     }
-    for(const page of p.pages) for(const o of page.objects) if(o.type==='image'&&!Object.hasOwn(p.assets,o.assetId)) throw Error('이미지 파일이 누락되었습니다.');
+    for(const page of p.pages) for(const o of page.objects) if((o.type==='image'||(o.type==='shape'&&o.assetId!==undefined))&&(typeof o.assetId!=='string'||!Object.hasOwn(p.assets,o.assetId))) throw Error('이미지 파일이 누락되었습니다.');
     if(p.fonts && (!Array.isArray(p.fonts)||p.fonts.length>100||p.fonts.some(f=>!f||typeof f.name!=='string'||typeof f.data!=='string'||!/^data:(font\/[\w.-]+|application\/[\w.-]+);base64,[\w+/=]+$/.test(f.data)))) throw Error('글꼴 데이터가 올바르지 않습니다.');
     for(const f of p.fonts||[])if(!f.name.trim()||f.name.length>200||(f.weight!==undefined&&(!Number.isFinite(f.weight)||f.weight<100||f.weight>900)))throw Error('글꼴 이름 또는 굵기가 올바르지 않습니다.');
     return p;
   }
-  const api={clamp,esc,num,point,perimeter,tailGeometry,thoughtTail,bubblePath,polygonPath,crops,wrapText,localPoint,validateProject};
+  const api={clamp,esc,num,point,perimeter,tailGeometry,thoughtTail,bubblePath,polygonPath,crops,wrapText,localPoint,imagePlacement,resizeImage,containsPoint,validateProject};
   if(typeof module!=='undefined') module.exports=api; else root.G=api;
 })(typeof window!=='undefined'?window:globalThis);

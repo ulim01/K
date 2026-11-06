@@ -13,8 +13,10 @@ function writeRequest(name,data){const file=path.join(process.env.RUNNER_TEMP||'
 (async()=>{
   if(repo!=='ulim01/K'||tag!==`panel-studio-v${version}`||!Number.isSafeInteger(releaseId)||process.env.GITHUB_REPOSITORY!==repo || !process.env.GITHUB_SHA) throw Error('Unexpected release environment');
   if(!/^\d+\.\d+\.\d+$/.test(version))throw Error('Invalid release version');
-  const {extractFile}=await import('@electron/asar');
+  const {extractFile,listPackage}=await import('@electron/asar');
   const archive=path.join(root,'releases','Panel Studio-win32-x64','resources','app.asar');
+  if(JSON.parse(extractFile(archive,'package.json')).version!==version)throw Error('Packaged app version mismatch');
+  if(listPackage(archive).some(file=>file.replaceAll('\\','/').startsWith('/assets/demo/')))throw Error('Removed background library was included in the package');
   const manifest=JSON.parse(fs.readFileSync(path.join(__dirname,'release-inputs.json'),'utf8'));
   for(const [file,expected] of Object.entries(manifest)) {
     if(digest(fs.readFileSync(path.join(root,file)))!==expected)throw Error('Source checksum mismatch: '+file);

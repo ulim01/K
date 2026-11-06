@@ -1,6 +1,5 @@
 from pathlib import Path
 import base64, json, subprocess, hashlib, concurrent.futures
-from PIL import Image
 from fontTools.ttLib import TTFont
 ROOT=Path(__file__).resolve().parent.parent
 FONT_DIR=ROOT/'assets/fonts'
@@ -23,11 +22,6 @@ for folder in sorted(set(f[1] for f in fonts)):
  if not target.exists():subprocess.run(['curl','--fail','--silent','--show-error','--location','--max-time','30',base+folder+'/OFL.txt','-o',str(target)],check=True)
 (FONT_DIR/'fonts.js').write_text('window.BUNDLED_FONTS='+json.dumps(records,ensure_ascii=False)+';',encoding='utf-8')
 (FONT_DIR/'sources.json').write_text(json.dumps([{k:v for k,v in f.items() if k!='data'} for f in records],ensure_ascii=False,indent=2),encoding='utf-8')
-demos=[]
-for p in sorted(ROOT.glob('*.png')):
- with Image.open(p) as im:w,h=im.size
- demos.append({'id':'demo-'+p.stem,'name':'배경 '+p.stem,'src':'data:image/png;base64,'+base64.b64encode(p.read_bytes()).decode(),'width':w,'height':h})
-(ROOT/'assets/demo/demo.js').write_text('window.DEMO_ASSETS='+json.dumps(demos,ensure_ascii=False)+';',encoding='utf-8')
 (ROOT/'vendor/jszip.min.js').write_bytes((ROOT/'node_modules/jszip/dist/jszip.min.js').read_bytes())
 (ROOT/'vendor/JSZip-LICENSE.txt').write_bytes((ROOT/'node_modules/jszip/LICENSE.markdown').read_bytes())
-print(f'Prepared {len(records)} font faces ({len(set(f["name"] for f in records))} families), licenses, and {len(demos)} background assets.')
+print(f'Prepared {len(records)} font faces ({len(set(f["name"] for f in records))} families) and licenses.')
